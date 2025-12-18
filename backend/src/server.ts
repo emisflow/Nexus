@@ -1,7 +1,17 @@
 import 'dotenv/config';
 import express from 'express';
-import { ClerkExpressRequireAuth, ClerkExpressWithAuth } from '@clerk/express';
+import { clerkMiddleware, requireAuth, getAuth } from '@clerk/express';
 import { createQueues, scheduleReminder } from './jobs/queues.js';
+
+declare global {
+  namespace Express {
+    interface Request {
+      auth: {
+        userId?: string;
+      } | null;
+    }
+  }
+}
 import { sendPushNotification } from './push/onesignal.js';
 import { ensureUser } from './db/users.js';
 import { upsertReminder, listReminders, computeNextRun, disableReminder, getReminder } from './db/reminders.js';
@@ -18,15 +28,15 @@ const app = express();
 const port = process.env.PORT ? Number(process.env.PORT) : 3000;
 
 app.use(express.json());
-app.use(ClerkExpressWithAuth());
+app.use(clerkMiddleware());
 
 const queues = createQueues();
 
-app.get('/health', (_req, res) => {
+app.get('/health', (_req: express.Request, res: express.Response) => {
   res.json({ status: 'ok' });
 });
 
-app.post('/api/me/ensure', ClerkExpressRequireAuth(), async (req, res) => {
+app.post('/api/me/ensure', requireAuth(), async (req, res) => {
   const userId = req.auth?.userId;
 
   if (!userId) {
@@ -38,7 +48,7 @@ app.post('/api/me/ensure', ClerkExpressRequireAuth(), async (req, res) => {
   res.json({ ensured: true, userId: user.id });
 });
 
-app.get('/api/me', ClerkExpressRequireAuth(), async (req, res) => {
+app.get('/api/me', requireAuth(), async (req, res) => {
   const userId = req.auth?.userId;
 
   if (!userId) {
@@ -50,7 +60,7 @@ app.get('/api/me', ClerkExpressRequireAuth(), async (req, res) => {
   res.json({ userId: user.id });
 });
 
-app.get('/api/reminders', ClerkExpressRequireAuth(), async (_req, res) => {
+app.get('/api/reminders', requireAuth(), async (_req, res) => {
   const clerkUserId = _req.auth?.userId;
 
   if (!clerkUserId) {
@@ -63,7 +73,7 @@ app.get('/api/reminders', ClerkExpressRequireAuth(), async (_req, res) => {
   res.json({ reminders });
 });
 
-app.post('/api/reminders', ClerkExpressRequireAuth(), async (req, res) => {
+app.post('/api/reminders', requireAuth(), async (req, res) => {
   const userId = req.auth?.userId;
   const { id, type, hour, minute, timezone, enabled } = req.body as {
     id?: string;
@@ -100,13 +110,13 @@ app.post('/api/reminders', ClerkExpressRequireAuth(), async (req, res) => {
   if (reminder.enabled && reminder.next_run_at) {
     await scheduleReminder(queues.reminders, { reminderId: reminder.id }, new Date(reminder.next_run_at));
   } else {
-    await queues.reminders.removeJobs([reminder.id]);
+    await queues.reminders.remove(reminder.id);
   }
 
   res.json({ reminder });
 });
 
-app.delete('/api/reminders/:id', ClerkExpressRequireAuth(), async (req, res) => {
+app.delete('/api/reminders/:id', requireAuth(), async (req, res) => {
   const userId = req.auth?.userId;
   const reminderId = req.params.id;
 
@@ -129,7 +139,7 @@ app.delete('/api/reminders/:id', ClerkExpressRequireAuth(), async (req, res) => 
   res.json({ disabled: true });
 });
 
-app.post('/api/notifications/register', ClerkExpressRequireAuth(), async (req, res) => {
+app.post('/api/notifications/register', requireAuth(), async (req, res) => {
   const userId = req.auth?.userId;
   const { token, platform } = req.body as { token?: string; platform?: string };
 
@@ -148,7 +158,7 @@ app.post('/api/notifications/register', ClerkExpressRequireAuth(), async (req, r
   res.json({ registered: true, token: stored });
 });
 
-app.post('/api/entries', ClerkExpressRequireAuth(), async (req, res) => {
+app.post('/api/entries', requireAuth(), async (req, res) => {
   const userId = req.auth?.userId;
 
   if (!userId) {
@@ -185,7 +195,7 @@ app.post('/api/entries', ClerkExpressRequireAuth(), async (req, res) => {
   res.json({ entry: result.entry, conflictId: result.conflictId });
 });
 
-app.get('/api/entries', ClerkExpressRequireAuth(), async (_req, res) => {
+app.get('/api/entries', requireAuth(), async (_req, res) => {
   const userId = _req.auth?.userId;
 
   if (!userId) {
@@ -199,7 +209,7 @@ app.get('/api/entries', ClerkExpressRequireAuth(), async (_req, res) => {
   res.json({ entries });
 });
 
-app.get('/api/entries/:id', ClerkExpressRequireAuth(), async (req, res) => {
+app.get('/api/entries/:id', requireAuth(), async (req, res) => {
   const userId = req.auth?.userId;
   const entryId = req.params.id;
 
@@ -219,7 +229,7 @@ app.get('/api/entries/:id', ClerkExpressRequireAuth(), async (req, res) => {
   res.json(result);
 });
 
-app.get('/api/conflicts', ClerkExpressRequireAuth(), async (req, res) => {
+app.get('/api/conflicts', requireAuth(), async (req, res) => {
   const userId = req.auth?.userId;
 
   if (!userId) {
@@ -232,7 +242,7 @@ app.get('/api/conflicts', ClerkExpressRequireAuth(), async (req, res) => {
   res.json({ conflicts });
 });
 
-app.post('/api/conflicts/:id/resolve', ClerkExpressRequireAuth(), async (req, res) => {
+app.post('/api/conflicts/:id/resolve', requireAuth(), async (req, res) => {
   const userId = req.auth?.userId;
   const { action, mergedText } = req.body as { action?: string; mergedText?: string };
 
@@ -265,7 +275,7 @@ app.post('/api/conflicts/:id/resolve', ClerkExpressRequireAuth(), async (req, re
   }
 });
 
-app.post('/notifications/instant', ClerkExpressRequireAuth(), async (req, res) => {
+app.post('/notifications/instant', requireAuth(), async (req, res) => {
   const userId = req.auth?.userId;
   const { message } = req.body as { message?: string };
 

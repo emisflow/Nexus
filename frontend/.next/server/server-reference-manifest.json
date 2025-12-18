@@ -1,0 +1,14 @@
+{
+  "node": {
+    "c41a87cc8fcd2fd7d0c6c9629157b90bfcc7f87e": {
+      "workers": {
+        "app/page": "(action-browser)/./node_modules/next/dist/build/webpack/loaders/next-flight-action-entry-loader.js?actions=%5B%5B%22D%3A%5C%5CApp%5C%5CNexus%5C%5Cfrontend%5C%5Cnode_modules%5C%5C%40clerk%5C%5Cnextjs%5C%5Cdist%5C%5Cesm%5C%5Capp-router%5C%5Cserver-actions.js%22%2C%5B%22invalidateCacheAction%22%5D%5D%5D&__client_imported__=true!"
+      },
+      "layer": {
+        "app/page": "action-browser"
+      }
+    }
+  },
+  "edge": {},
+  "encryptionKey": "mjrLwOQfNzuOtNYLIA4Chg7VotQiPLgVjTHvRVKoffM="
+}

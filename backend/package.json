@@ -4,15 +4,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "TS_NODE_TRANSPILE_ONLY=1 node --loader ts-node/esm src/server.ts",
-    "worker": "TS_NODE_TRANSPILE_ONLY=1 node --loader ts-node/esm src/worker.ts",
-    "worker:reminders": "TS_NODE_TRANSPILE_ONLY=1 node --loader ts-node/esm src/worker.ts",
+    "dev": "cross-env TS_NODE_TRANSPILE_ONLY=1 node --loader ts-node/esm src/server.ts",
+    "worker": "cross-env TS_NODE_TRANSPILE_ONLY=1 node --loader ts-node/esm src/worker.ts",
+    "worker:reminders": "cross-env TS_NODE_TRANSPILE_ONLY=1 node --loader ts-node/esm src/worker.ts",
     "build": "tsc -p tsconfig.json",
     "test": "vitest run"
   },
   "dependencies": {
-    "@clerk/express": "^0.3.1",
-    "@onesignal/node-onesignal": "^1.0.2",
+    "@clerk/express": "^1.0.0",
+    "@onesignal/node-onesignal": "*",
     "bullmq": "^5.6.1",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
@@ -21,8 +21,10 @@
     "pg": "^8.11.5"
   },
   "devDependencies": {
-    "@types/pg": "^8.11.6",
+    "@types/express": "^5.0.6",
     "@types/node": "^20.14.11",
+    "@types/pg": "^8.11.6",
+    "cross-env": "^7.0.3",
     "pg-mem": "^3.0.5",
     "ts-node": "^10.9.2",
     "typescript": "^5.4.5",

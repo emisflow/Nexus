@@ -1,18 +1,31 @@
 import { createConfiguration, DefaultApi, Notification } from '@onesignal/node-onesignal';
 
-const appId = process.env.ONESIGNAL_APP_ID;
-const restApiKey = process.env.ONESIGNAL_REST_API_KEY;
+let cached:
+  | { appId: string; client: DefaultApi }
+  | null
+  | undefined = undefined;
 
-if (!appId) {
-  throw new Error('ONESIGNAL_APP_ID is required');
+function getOneSignal() {
+  // cache result so we don’t recreate the client every call
+  if (cached !== undefined) return cached;
+
+  const appId = process.env.ONESIGNAL_APP_ID;
+  const restApiKey = process.env.ONESIGNAL_REST_API_KEY;
+
+  if (!appId || !restApiKey) {
+    console.warn(
+      '[OneSignal] Missing ONESIGNAL_APP_ID or ONESIGNAL_REST_API_KEY. Push notifications disabled.'
+    );
+    cached = null;
+    return cached;
+  }
+
+  const configuration = createConfiguration({
+    restApiKey: restApiKey,
+  });
+  cached = { appId, client: new DefaultApi(configuration) };
+  return cached;
 }
-
-if (!restApiKey) {
-  throw new Error('ONESIGNAL_REST_API_KEY is required');
-}
-
-const configuration = createConfiguration({ appKey: restApiKey });
-const oneSignalClient = new DefaultApi(configuration);
 
 export async function sendPushNotification({
   userId,
@@ -23,15 +36,18 @@ export async function sendPushNotification({
   message: string;
   tokens?: string[];
 }) {
+  const one = getOneSignal();
+  if (!one) return; // don’t crash dev server
+
   const notification = new Notification();
-  notification.app_id = appId;
+  notification.app_id = one.appId;
   notification.contents = { en: message };
 
   if (tokens && tokens.length > 0) {
-    notification.include_player_ids = tokens;
+    (notification as any).include_external_user_ids = tokens;
   } else {
-    notification.include_external_user_ids = [userId];
+    (notification as any).include_external_user_ids = [userId];
   }
 
-  await oneSignalClient.createNotification(notification);
+  await one.client.createNotification(notification);
 }
