@@ -2,6 +2,7 @@ import { describe, expect, it, beforeAll, vi } from 'vitest';
 import { readFileSync } from 'fs';
 import path from 'path';
 import { newDb } from 'pg-mem';
+import { randomUUID } from 'crypto';
 
 // Prepare in-memory pg and mock the pg module before importing code that creates pools.
 const mem = newDb({ autoCreateForeignKeyIndices: true });
@@ -9,9 +10,16 @@ const pg = mem.adapters.createPg();
 vi.mock('pg', () => ({ Pool: pg.Pool }));
 
 // Apply migration to in-memory DB (strip extensions/defaults not supported in pg-mem)
-const migrationSql = readFileSync(path.join(__dirname, '../src/db/migrations/001_init.sql'), 'utf8')
-  .replace(/CREATE EXTENSION[^;]+;/g, '')
-  .replace(/DEFAULT gen_random_uuid\(\)/g, '');
+mem.public.registerFunction({
+  name: 'gen_random_uuid',
+  returns: 'uuid',
+  implementation: randomUUID,
+});
+
+const migrationSql = readFileSync(path.join(__dirname, '../src/db/migrations/001_init.sql'), 'utf8').replace(
+  /CREATE EXTENSION[^;]+;/g,
+  ''
+);
 mem.public.none(migrationSql);
 
 // Import after mocks
