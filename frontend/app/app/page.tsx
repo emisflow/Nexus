@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { habitTemplates, metricTemplates } from './config';
 
 type Metric = { key: string; value: string };
 type Habit = { habitId: string; completed: boolean };
@@ -8,6 +9,7 @@ type Entry = {
   id: string;
   entry_date: string;
   journal_text: string | null;
+  updated_at: string;
   metrics: { key: string; value_num: number | null; value_text: string | null }[];
   habits: { habit_id: string; completed: boolean }[];
 };
@@ -16,6 +18,15 @@ type AnalyticsBucket = {
   entryCount: number;
   metrics: { key: string; average: number | null; samples: number }[];
   habits: { habit_id: string; completion_rate: number; samples: number }[];
+};
+
+type Conflict = {
+  id: string;
+  field: string;
+  local_version: string | null;
+  remote_version: string | null;
+  status: string;
+  entry_date: string;
 };
 
 export default function AppDashboard() {
@@ -27,6 +38,11 @@ export default function AppDashboard() {
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [entries, setEntries] = useState<Entry[]>([]);
+  const [baseUpdatedAt, setBaseUpdatedAt] = useState<string | null>(null);
+  const [conflicts, setConflicts] = useState<Conflict[]>([]);
+  const [conflictError, setConflictError] = useState<string | null>(null);
+  const [resolvingId, setResolvingId] = useState<string | null>(null);
+  const [mergeDrafts, setMergeDrafts] = useState<Record<string, string>>({});
   const [analytics, setAnalytics] = useState<{ last7: AnalyticsBucket; last30: AnalyticsBucket } | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -44,10 +60,24 @@ export default function AppDashboard() {
     setAnalytics(data);
   };
 
+  const loadConflicts = async () => {
+    const resp = await fetch('/api/conflicts');
+    if (!resp.ok) throw new Error('Failed to load conflicts');
+    const data = (await resp.json()) as { conflicts: Conflict[] };
+    setConflicts(data.conflicts ?? []);
+    setMergeDrafts((prev) => {
+      const next: Record<string, string> = {};
+      (data.conflicts ?? []).forEach((conflict) => {
+        next[conflict.id] = conflict.id in prev ? prev[conflict.id] : conflict.local_version ?? '';
+      });
+      return next;
+    });
+  };
+
   useEffect(() => {
     const bootstrap = async () => {
       try {
-        await Promise.all([loadEntries(), loadAnalytics()]);
+        await Promise.all([loadEntries(), loadAnalytics(), loadConflicts()]);
       } catch (err) {
         console.error(err);
       } finally {
@@ -58,25 +88,94 @@ export default function AppDashboard() {
     bootstrap();
   }, []);
 
+  const selectedEntry = useMemo(() => entries.find((entry) => entry.entry_date === entryDate), [entries, entryDate]);
+
+  useEffect(() => {
+    if (!selectedEntry) {
+      setJournalText('');
+      setMetrics([{ key: '', value: '' }]);
+      setHabits([{ habitId: '', completed: false }]);
+      setBaseUpdatedAt(null);
+      return;
+    }
+
+    setJournalText(selectedEntry.journal_text ?? '');
+    setMetrics(
+      selectedEntry.metrics.length
+        ? selectedEntry.metrics.map((metric) => ({
+            key: metric.key,
+            value: metric.value_num?.toString() ?? metric.value_text ?? '',
+          }))
+        : [{ key: '', value: '' }]
+    );
+    setHabits(
+      selectedEntry.habits.length
+        ? selectedEntry.habits.map((habit) => ({ habitId: habit.habit_id, completed: habit.completed }))
+        : [{ habitId: '', completed: false }]
+    );
+    setBaseUpdatedAt(selectedEntry.updated_at);
+  }, [selectedEntry]);
+
   const handleSubmit = async () => {
-    setSaving(true);
     setSaveMessage(null);
     setSaveError(null);
 
-    const preparedMetrics = metrics
-      .filter((m) => m.key.trim().length > 0 && m.value.trim().length > 0)
-      .map((m) => ({ key: m.key.trim(), value_num: Number(m.value) }));
+    const errors: string[] = [];
 
-    const preparedHabits = habits.filter((h) => h.habitId.trim().length > 0).map((h) => ({
-      habitId: h.habitId.trim(),
-      completed: h.completed,
-    }));
+    const preparedMetrics = metrics
+      .map((m, idx) => {
+        const key = m.key.trim();
+        const value = m.value.trim();
+
+        if (!key && !value) return null;
+        if (!key) {
+          errors.push(`Metric ${idx + 1} is missing a name.`);
+          return null;
+        }
+        if (!value) {
+          errors.push(`Metric "${key}" needs a value.`);
+          return null;
+        }
+
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed)) {
+          errors.push(`Metric "${key}" must be a number.`);
+          return null;
+        }
+
+        return { key, value_num: parsed };
+      })
+      .filter((m): m is { key: string; value_num: number } => m !== null);
+
+    const preparedHabits = habits
+      .map((h, idx) => {
+        const habitId = h.habitId.trim();
+        if (!habitId && h.completed) {
+          errors.push(`Habit ${idx + 1} needs an identifier to log completion.`);
+        }
+        if (!habitId) return null;
+        return { habitId, completed: h.completed };
+      })
+      .filter((h): h is { habitId: string; completed: boolean } => h !== null);
+
+    if (errors.length > 0) {
+      setSaveError(errors.join(' '));
+      return;
+    }
+
+    setSaving(true);
 
     try {
       const resp = await fetch('/api/entries', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entryDate, journalText, metrics: preparedMetrics, habits: preparedHabits }),
+        body: JSON.stringify({
+          entryDate,
+          journalText,
+          metrics: preparedMetrics,
+          habits: preparedHabits,
+          baseUpdatedAt: baseUpdatedAt ?? undefined,
+        }),
       });
 
       if (!resp.ok) {
@@ -84,12 +183,48 @@ export default function AppDashboard() {
         throw new Error(text || 'Failed to save entry');
       }
 
-      setSaveMessage('Entry saved and synced.');
-      await Promise.all([loadEntries(), loadAnalytics()]);
+      const data = (await resp.json()) as { entry: Entry; conflictId?: string | null };
+
+      if (data.conflictId) {
+        setSaveMessage('Another version exists. We saved a conflict copy—review below.');
+      } else {
+        setSaveMessage('Entry saved and synced.');
+      }
+
+      setBaseUpdatedAt(data.entry.updated_at);
+
+      await Promise.all([loadEntries(), loadAnalytics(), loadConflicts()]);
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Failed to save entry');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleResolve = async (
+    conflictId: string,
+    action: 'keep_current' | 'use_other' | 'merge_manual',
+    mergedText?: string
+  ) => {
+    setResolvingId(conflictId);
+    setConflictError(null);
+    try {
+      const resp = await fetch(`/api/conflicts/${conflictId}/resolve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, mergedText }),
+      });
+
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(text || 'Failed to resolve conflict');
+      }
+
+      await Promise.all([loadConflicts(), loadEntries(), loadAnalytics()]);
+    } catch (err) {
+      setConflictError(err instanceof Error ? err.message : 'Failed to resolve conflict');
+    } finally {
+      setResolvingId(null);
     }
   };
 
@@ -159,11 +294,20 @@ export default function AppDashboard() {
             <h3 style={{ margin: 0 }}>Metrics</h3>
             <button onClick={() => setMetrics((m) => [...m, { key: '', value: '' }])}>Add metric</button>
           </div>
+          <p style={{ margin: 0, color: '#6b7280' }}>Choose from your template or enter a custom metric.</p>
+          <datalist id="metric-options">
+            {metricTemplates.map((template) => (
+              <option key={template.key} value={template.key}>
+                {template.label}
+              </option>
+            ))}
+          </datalist>
           {metrics.map((metric, idx) => (
             <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '0.5rem', alignItems: 'center' }}>
               <input
                 type="text"
                 placeholder="Name (e.g. mood)"
+                list="metric-options"
                 value={metric.key}
                 onChange={(e) => {
                   const next = [...metrics];
@@ -173,7 +317,7 @@ export default function AppDashboard() {
               />
               <input
                 type="number"
-                placeholder="Value"
+                placeholder={metricTemplates.find((t) => t.key === metric.key)?.placeholder ?? 'Value'}
                 value={metric.value}
                 onChange={(e) => {
                   const next = [...metrics];
@@ -196,11 +340,20 @@ export default function AppDashboard() {
             <h3 style={{ margin: 0 }}>Habits</h3>
             <button onClick={() => setHabits((h) => [...h, { habitId: '', completed: false }])}>Add habit</button>
           </div>
+          <p style={{ margin: 0, color: '#6b7280' }}>Pick from common habits or add your own identifier.</p>
+          <datalist id="habit-options">
+            {habitTemplates.map((habit) => (
+              <option key={habit.id} value={habit.id}>
+                {habit.label}
+              </option>
+            ))}
+          </datalist>
           {habits.map((habit, idx) => (
             <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: '0.5rem', alignItems: 'center' }}>
               <input
                 type="text"
                 placeholder="Habit identifier"
+                list="habit-options"
                 value={habit.habitId}
                 onChange={(e) => {
                   const next = [...habits];
@@ -233,6 +386,78 @@ export default function AppDashboard() {
           </button>
         </div>
       </section>
+
+      {conflicts.length > 0 ? (
+        <section
+          style={{
+            border: '1px solid #f0ad4e',
+            borderRadius: '10px',
+            padding: '1rem',
+            display: 'grid',
+            gap: '0.75rem',
+            background: '#fffaf0',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <h2 style={{ margin: 0 }}>Unresolved conflicts</h2>
+              <p style={{ margin: 0, color: '#6b7280' }}>
+                Review differences and choose whether to keep your current text, use the other copy, or merge.
+              </p>
+            </div>
+            {conflictError ? <span style={{ color: '#dc2626' }}>{conflictError}</span> : null}
+          </div>
+
+          {conflicts.map((conflict) => (
+            <details key={conflict.id} style={{ border: '1px solid #f3f4f6', padding: '0.75rem', borderRadius: '8px' }}>
+              <summary style={{ cursor: 'pointer' }}>
+                {conflict.entry_date} – {conflict.field}
+              </summary>
+              <div style={{ display: 'grid', gap: '0.5rem', marginTop: '0.5rem' }}>
+                <div style={{ display: 'grid', gap: '0.25rem' }}>
+                  <strong>Current version</strong>
+                  <pre style={{ margin: 0, whiteSpace: 'pre-wrap', background: '#f9fafb', padding: '0.5rem' }}>
+                    {conflict.local_version || '(empty)'}
+                  </pre>
+                </div>
+                <div style={{ display: 'grid', gap: '0.25rem' }}>
+                  <strong>Other copy</strong>
+                  <pre style={{ margin: 0, whiteSpace: 'pre-wrap', background: '#f9fafb', padding: '0.5rem' }}>
+                    {conflict.remote_version || '(empty)'}
+                  </pre>
+                </div>
+                <label style={{ display: 'grid', gap: '0.25rem' }}>
+                  Merge notes
+                  <textarea
+                    value={mergeDrafts[conflict.id] ?? ''}
+                    onChange={(e) =>
+                      setMergeDrafts((prev) => ({
+                        ...prev,
+                        [conflict.id]: e.target.value,
+                      }))
+                    }
+                    rows={4}
+                  />
+                </label>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <button onClick={() => handleResolve(conflict.id, 'keep_current')} disabled={resolvingId === conflict.id}>
+                    Keep current
+                  </button>
+                  <button onClick={() => handleResolve(conflict.id, 'use_other')} disabled={resolvingId === conflict.id}>
+                    Use other copy
+                  </button>
+                  <button
+                    onClick={() => handleResolve(conflict.id, 'merge_manual', mergeDrafts[conflict.id] ?? '')}
+                    disabled={resolvingId === conflict.id}
+                  >
+                    Save merged version
+                  </button>
+                </div>
+              </div>
+            </details>
+          ))}
+        </section>
+      ) : null}
 
       <section style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1rem', alignItems: 'start' }}>
         <div style={{ border: '1px solid #e5e7eb', borderRadius: '10px', padding: '1rem', display: 'grid', gap: '0.75rem' }}>
