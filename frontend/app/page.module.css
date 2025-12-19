@@ -1,0 +1,130 @@
+.main {
+  min-height: 100vh;
+  display: grid;
+  align-items: center;
+  background: radial-gradient(circle at 20% 20%, rgba(99, 102, 241, 0.12), transparent 35%),
+    radial-gradient(circle at 80% 10%, rgba(14, 165, 233, 0.08), transparent 30%),
+    var(--bg);
+  padding: 3rem 0 4rem;
+}
+
+.heroCard {
+  background: rgba(11, 18, 34, 0.9);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  padding: 2.5rem;
+  box-shadow: 0 25px 80px rgba(0, 0, 0, 0.35);
+  display: grid;
+  gap: 1.5rem;
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  background: rgba(99, 102, 241, 0.12);
+  color: var(--accent);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.heroTitle {
+  font-size: clamp(2.25rem, 2.8vw, 3.25rem);
+  margin: 0;
+}
+
+.lede {
+  color: var(--muted);
+  line-height: 1.8;
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.primaryCta {
+  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+  color: #f8fafc;
+  padding: 0.9rem 1.4rem;
+  border-radius: 12px;
+  border: none;
+  text-decoration: none;
+  font-weight: 700;
+  box-shadow: 0 18px 40px rgba(99, 102, 241, 0.35);
+}
+
+.secondaryCta {
+  border: 1px solid var(--border);
+  color: #e2e8f0;
+  padding: 0.9rem 1.25rem;
+  border-radius: 12px;
+  text-decoration: none;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+}
+
+.card {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 1.25rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.card strong {
+  font-size: 1.05rem;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.badgeDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.inlineList {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  color: var(--muted);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+@media (max-width: 720px) {
+  .heroCard {
+    padding: 1.75rem;
+  }
+
+  .actions {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .primaryCta,
+  .secondaryCta {
+    width: 100%;
+    text-align: center;
+  }
+}

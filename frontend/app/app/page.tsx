@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { habitTemplates, metricTemplates } from './config';
+import styles from './page.module.css';
 
 type Metric = { key: string; value: string };
 type Habit = { habitId: string; completed: boolean };
@@ -45,6 +46,7 @@ export default function AppDashboard() {
   const [mergeDrafts, setMergeDrafts] = useState<Record<string, string>>({});
   const [analytics, setAnalytics] = useState<{ last7: AnalyticsBucket; last30: AnalyticsBucket } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [exportFrom, setExportFrom] = useState('');
   const [exportTo, setExportTo] = useState('');
   const [exportFormat, setExportFormat] = useState<'long' | 'wide'>('long');
@@ -82,7 +84,7 @@ export default function AppDashboard() {
       try {
         await Promise.all([loadEntries(), loadAnalytics(), loadConflicts()]);
       } catch (err) {
-        console.error(err);
+        setLoadError(err instanceof Error ? err.message : 'Something went wrong while loading data');
       } finally {
         setLoading(false);
       }
@@ -255,57 +257,70 @@ export default function AppDashboard() {
   const preparedEntries = useMemo(() => entries.slice(0, 5), [entries]);
 
   if (loading) {
-    return <main style={{ padding: '1rem' }}>Loading your dashboard...</main>;
+    return (
+      <main className={styles.main}>
+        <div className={`${styles.stateBar} ${styles.stateBarInfo}`}>Loading your dashboard…</div>
+      </main>
+    );
   }
 
   return (
-    <main style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem' }}>
-        <div>
-          <p style={{ color: '#6b7280', margin: 0 }}>Welcome back</p>
-          <h1 style={{ margin: 0 }}>Daily dashboard</h1>
+    <main className={styles.main}>
+      {loadError ? (
+        <div className={`${styles.stateBar} ${styles.stateBarError}`}>{loadError}</div>
+      ) : (
+        <div className={`${styles.stateBar} ${styles.stateBarSuccess}`}>
+          Data synced. Update your entry and we’ll keep everything backed up.
         </div>
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+      )}
+
+      <header className={styles.header}>
+        <div>
+          <p className={styles.muted}>Welcome back</p>
+          <h1 className={styles.sectionTitle}>Daily dashboard</h1>
+        </div>
+        <div className={styles.toolbar}>
+          <label className={styles.inputGroup}>
             From
-            <input type="date" value={exportFrom} onChange={(e) => setExportFrom(e.target.value)} />
+            <input className={styles.input} type="date" value={exportFrom} onChange={(e) => setExportFrom(e.target.value)} />
           </label>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+          <label className={styles.inputGroup}>
             To
-            <input type="date" value={exportTo} onChange={(e) => setExportTo(e.target.value)} />
+            <input className={styles.input} type="date" value={exportTo} onChange={(e) => setExportTo(e.target.value)} />
           </label>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+          <label className={styles.inputGroup}>
             Format
-            <select value={exportFormat} onChange={(e) => setExportFormat(e.target.value as 'long' | 'wide')}>
+            <select
+              className={styles.select}
+              value={exportFormat}
+              onChange={(e) => setExportFormat(e.target.value as 'long' | 'wide')}
+            >
               <option value="long">Long (metrics/habits as JSON)</option>
               <option value="wide">Wide (columns per metric/habit)</option>
             </select>
           </label>
-          <button onClick={handleExport}>Export CSV</button>
+          <button className={`${styles.button} ${styles.buttonGhost}`} onClick={handleExport}>
+            Export CSV
+          </button>
         </div>
       </header>
 
-      <section
-        style={{
-          border: '1px solid #e5e7eb',
-          borderRadius: '10px',
-          padding: '1rem',
-          display: 'grid',
-          gap: '0.75rem',
-        }}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h2 style={{ margin: 0 }}>Log today&apos;s entry</h2>
-          {saveMessage ? <span style={{ color: '#16a34a' }}>{saveMessage}</span> : null}
-          {saveError ? <span style={{ color: '#dc2626' }}>{saveError}</span> : null}
+      <section className={styles.card}>
+        <div className={styles.header}>
+          <h2 className={styles.sectionTitle}>Log today&apos;s entry</h2>
+          <div className={styles.badgeRow}>
+            {saveMessage ? <span className={`${styles.badge} ${styles.tagSuccess}`}>{saveMessage}</span> : null}
+            {saveError ? <span className={`${styles.badge} ${styles.tagDanger}`}>{saveError}</span> : null}
+          </div>
         </div>
-        <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+        <label className={styles.inputGroup}>
           Entry date
-          <input type="date" value={entryDate} onChange={(e) => setEntryDate(e.target.value)} />
+          <input className={styles.input} type="date" value={entryDate} onChange={(e) => setEntryDate(e.target.value)} />
         </label>
-        <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+        <label className={styles.inputGroup}>
           Journal text
           <textarea
+            className={styles.textarea}
             value={journalText}
             onChange={(e) => setJournalText(e.target.value)}
             rows={6}
@@ -313,12 +328,14 @@ export default function AppDashboard() {
           />
         </label>
 
-        <div style={{ display: 'grid', gap: '0.5rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h3 style={{ margin: 0 }}>Metrics</h3>
-            <button onClick={() => setMetrics((m) => [...m, { key: '', value: '' }])}>Add metric</button>
+        <div>
+          <div className={styles.header}>
+            <h3 className={styles.sectionTitle}>Metrics</h3>
+            <button className={`${styles.button} ${styles.buttonGhost}`} onClick={() => setMetrics((m) => [...m, { key: '', value: '' }])}>
+              Add metric
+            </button>
           </div>
-          <p style={{ margin: 0, color: '#6b7280' }}>Choose from your template or enter a custom metric.</p>
+          <p className={styles.helper}>Choose from your template or enter a custom metric.</p>
           <datalist id="metric-options">
             {metricTemplates.map((template) => (
               <option key={template.key} value={template.key}>
@@ -326,45 +343,52 @@ export default function AppDashboard() {
               </option>
             ))}
           </datalist>
-          {metrics.map((metric, idx) => (
-            <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '0.5rem', alignItems: 'center' }}>
-              <input
-                type="text"
-                placeholder="Name (e.g. mood)"
-                list="metric-options"
-                value={metric.key}
-                onChange={(e) => {
-                  const next = [...metrics];
-                  next[idx] = { ...metric, key: e.target.value };
-                  setMetrics(next);
-                }}
-              />
-              <input
-                type="number"
-                placeholder={metricTemplates.find((t) => t.key === metric.key)?.placeholder ?? 'Value'}
-                value={metric.value}
-                onChange={(e) => {
-                  const next = [...metrics];
-                  next[idx] = { ...metric, value: e.target.value };
-                  setMetrics(next);
-                }}
-              />
-              <button
-                onClick={() => setMetrics((prev) => prev.filter((_, i) => i !== idx))}
-                disabled={metrics.length === 1}
-              >
-                Remove
-              </button>
-            </div>
-          ))}
+          <div className={styles.card}>
+            {metrics.map((metric, idx) => (
+              <div key={idx} className={styles.metricRow}>
+                <input
+                  className={styles.input}
+                  type="text"
+                  placeholder="Name (e.g. mood)"
+                  list="metric-options"
+                  value={metric.key}
+                  onChange={(e) => {
+                    const next = [...metrics];
+                    next[idx] = { ...metric, key: e.target.value };
+                    setMetrics(next);
+                  }}
+                />
+                <input
+                  className={styles.input}
+                  type="number"
+                  placeholder={metricTemplates.find((t) => t.key === metric.key)?.placeholder ?? 'Value'}
+                  value={metric.value}
+                  onChange={(e) => {
+                    const next = [...metrics];
+                    next[idx] = { ...metric, value: e.target.value };
+                    setMetrics(next);
+                  }}
+                />
+                <button
+                  className={`${styles.button} ${styles.buttonGhost}`}
+                  onClick={() => setMetrics((prev) => prev.filter((_, i) => i !== idx))}
+                  disabled={metrics.length === 1}
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
 
-        <div style={{ display: 'grid', gap: '0.5rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h3 style={{ margin: 0 }}>Habits</h3>
-            <button onClick={() => setHabits((h) => [...h, { habitId: '', completed: false }])}>Add habit</button>
+        <div>
+          <div className={styles.header}>
+            <h3 className={styles.sectionTitle}>Habits</h3>
+            <button className={`${styles.button} ${styles.buttonGhost}`} onClick={() => setHabits((h) => [...h, { habitId: '', completed: false }])}>
+              Add habit
+            </button>
           </div>
-          <p style={{ margin: 0, color: '#6b7280' }}>Pick from common habits or add your own identifier.</p>
+          <p className={styles.helper}>Pick from common habits or add your own identifier.</p>
           <datalist id="habit-options">
             {habitTemplates.map((habit) => (
               <option key={habit.id} value={habit.id}>
@@ -372,158 +396,144 @@ export default function AppDashboard() {
               </option>
             ))}
           </datalist>
-          {habits.map((habit, idx) => (
-            <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: '0.5rem', alignItems: 'center' }}>
-              <input
-                type="text"
-                placeholder="Habit identifier"
-                list="habit-options"
-                value={habit.habitId}
-                onChange={(e) => {
-                  const next = [...habits];
-                  next[idx] = { ...habit, habitId: e.target.value };
-                  setHabits(next);
-                }}
-              />
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+          <div className={styles.card}>
+            {habits.map((habit, idx) => (
+              <div key={idx} className={styles.habitRow}>
                 <input
-                  type="checkbox"
-                  checked={habit.completed}
+                  className={styles.input}
+                  type="text"
+                  placeholder="Habit identifier"
+                  list="habit-options"
+                  value={habit.habitId}
                   onChange={(e) => {
                     const next = [...habits];
-                    next[idx] = { ...habit, completed: e.target.checked };
+                    next[idx] = { ...habit, habitId: e.target.value };
                     setHabits(next);
                   }}
                 />
-                Completed
-              </label>
-              <button onClick={() => setHabits((prev) => prev.filter((_, i) => i !== idx))} disabled={habits.length === 1}>
-                Remove
-              </button>
-            </div>
-          ))}
+                <label className={styles.actionsRow}>
+                  <input
+                    className={styles.checkbox}
+                    type="checkbox"
+                    checked={habit.completed}
+                    onChange={(e) => {
+                      const next = [...habits];
+                      next[idx] = { ...habit, completed: e.target.checked };
+                      setHabits(next);
+                    }}
+                  />
+                  Completed
+                </label>
+                <button
+                  className={`${styles.button} ${styles.buttonGhost}`}
+                  onClick={() => setHabits((prev) => prev.filter((_, i) => i !== idx))}
+                  disabled={habits.length === 1}
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
 
         <div>
-          <button onClick={handleSubmit} disabled={saving}>
-            {saving ? 'Saving...' : 'Save entry'}
+          <button className={styles.button} onClick={handleSubmit} disabled={saving}>
+            {saving ? 'Saving…' : 'Save entry'}
           </button>
         </div>
       </section>
 
       {conflicts.length > 0 ? (
-        <section
-          style={{
-            border: '1px solid #f0ad4e',
-            borderRadius: '10px',
-            padding: '1rem',
-            display: 'grid',
-            gap: '0.75rem',
-            background: '#fffaf0',
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <section className={styles.card}>
+          <div className={styles.header}>
             <div>
-              <h2 style={{ margin: 0 }}>Unresolved conflicts</h2>
-              <p style={{ margin: 0, color: '#6b7280' }}>
+              <h2 className={styles.sectionTitle}>Unresolved conflicts</h2>
+              <p className={styles.helper}>
                 Review differences and choose whether to keep your current text, use the other copy, or merge.
               </p>
             </div>
-            {conflictError ? <span style={{ color: '#dc2626' }}>{conflictError}</span> : null}
+            {conflictError ? <span className={`${styles.badge} ${styles.tagDanger}`}>{conflictError}</span> : null}
           </div>
 
           {conflicts.map((conflict) => (
-            <details key={conflict.id} style={{ border: '1px solid #f3f4f6', padding: '0.75rem', borderRadius: '8px' }}>
-              <summary style={{ cursor: 'pointer' }}>
+            <details key={conflict.id} className={styles.card}>
+              <summary>
                 {conflict.entry_date} – {conflict.field}
               </summary>
-              <div style={{ display: 'grid', gap: '0.5rem', marginTop: '0.5rem' }}>
-                <div style={{ display: 'grid', gap: '0.25rem' }}>
+              <div className={styles.actionsRow}>
+                <div>
                   <strong>Current version</strong>
-                  <pre style={{ margin: 0, whiteSpace: 'pre-wrap', background: '#f9fafb', padding: '0.5rem' }}>
-                    {conflict.local_version || '(empty)'}
-                  </pre>
+                  <pre className={styles.helper}>{conflict.local_version || '(empty)'}</pre>
                 </div>
-                <div style={{ display: 'grid', gap: '0.25rem' }}>
+                <div>
                   <strong>Other copy</strong>
-                  <pre style={{ margin: 0, whiteSpace: 'pre-wrap', background: '#f9fafb', padding: '0.5rem' }}>
-                    {conflict.remote_version || '(empty)'}
-                  </pre>
+                  <pre className={styles.helper}>{conflict.remote_version || '(empty)'}</pre>
                 </div>
-                <label style={{ display: 'grid', gap: '0.25rem' }}>
-                  Merge notes
-                  <textarea
-                    value={mergeDrafts[conflict.id] ?? ''}
-                    onChange={(e) =>
-                      setMergeDrafts((prev) => ({
-                        ...prev,
-                        [conflict.id]: e.target.value,
-                      }))
-                    }
-                    rows={4}
-                  />
-                </label>
-                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  <button onClick={() => handleResolve(conflict.id, 'keep_current')} disabled={resolvingId === conflict.id}>
-                    Keep current
-                  </button>
-                  <button onClick={() => handleResolve(conflict.id, 'use_other')} disabled={resolvingId === conflict.id}>
-                    Use other copy
-                  </button>
-                  <button
-                    onClick={() => handleResolve(conflict.id, 'merge_manual', mergeDrafts[conflict.id] ?? '')}
-                    disabled={resolvingId === conflict.id}
-                  >
-                    Save merged version
-                  </button>
-                </div>
+              </div>
+              <label className={styles.inputGroup}>
+                Merge notes
+                <textarea
+                  className={styles.textarea}
+                  value={mergeDrafts[conflict.id] ?? ''}
+                  onChange={(e) =>
+                    setMergeDrafts((prev) => ({
+                      ...prev,
+                      [conflict.id]: e.target.value,
+                    }))
+                  }
+                  rows={4}
+                />
+              </label>
+              <div className={styles.actionsRow}>
+                <button className={`${styles.button} ${styles.buttonGhost}`} onClick={() => handleResolve(conflict.id, 'keep_current')} disabled={resolvingId === conflict.id}>
+                  Keep current
+                </button>
+                <button className={`${styles.button} ${styles.buttonGhost}`} onClick={() => handleResolve(conflict.id, 'use_other')} disabled={resolvingId === conflict.id}>
+                  Use other copy
+                </button>
+                <button
+                  className={styles.button}
+                  onClick={() => handleResolve(conflict.id, 'merge_manual', mergeDrafts[conflict.id] ?? '')}
+                  disabled={resolvingId === conflict.id}
+                >
+                  Save merged version
+                </button>
               </div>
             </details>
           ))}
         </section>
       ) : null}
 
-      <section style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1rem', alignItems: 'start' }}>
-        <div style={{ border: '1px solid #e5e7eb', borderRadius: '10px', padding: '1rem', display: 'grid', gap: '0.75rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h2 style={{ margin: 0 }}>Recent entries</h2>
-            <span style={{ color: '#6b7280' }}>{entries.length} total</span>
+      <section className={styles.gridTwoColumn}>
+        <div className={styles.card}>
+          <div className={styles.header}>
+            <h2 className={styles.sectionTitle}>Recent entries</h2>
+            <span className={styles.muted}>{entries.length} total</span>
           </div>
-          {preparedEntries.length === 0 ? <p>No entries yet.</p> : null}
+          {preparedEntries.length === 0 ? <p className={styles.emptyState}>No entries yet.</p> : null}
           {preparedEntries.map((entry) => (
-            <div key={entry.id} style={{ border: '1px solid #f3f4f6', padding: '0.75rem', borderRadius: '8px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div key={entry.id} className={styles.card}>
+              <div className={styles.header}>
                 <strong>{entry.entry_date}</strong>
               </div>
               {entry.journal_text ? (
-                <p style={{ margin: '0.5rem 0', whiteSpace: 'pre-wrap' }}>{entry.journal_text}</p>
+                <p className={styles.bodyText}>{entry.journal_text}</p>
               ) : (
-                <p style={{ margin: '0.5rem 0', color: '#6b7280' }}>No journal text</p>
+                <p className={styles.emptyState}>No journal text</p>
               )}
               {entry.metrics.length > 0 ? (
-                <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <div className={styles.badgeRow}>
                   {entry.metrics.map((metric) => (
-                    <span
-                      key={metric.key}
-                      style={{ background: '#eef2ff', color: '#4338ca', padding: '0.25rem 0.5rem', borderRadius: '6px' }}
-                    >
+                    <span key={metric.key} className={styles.badge}>
                       {metric.key}: {metric.value_num ?? metric.value_text}
                     </span>
                   ))}
                 </div>
               ) : null}
               {entry.habits.length > 0 ? (
-                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
+                <div className={styles.badgeRow}>
                   {entry.habits.map((habit) => (
-                    <span
-                      key={habit.habit_id}
-                      style={{
-                        background: habit.completed ? '#dcfce7' : '#fee2e2',
-                        color: habit.completed ? '#15803d' : '#b91c1c',
-                        padding: '0.25rem 0.5rem',
-                        borderRadius: '6px',
-                      }}
-                    >
+                    <span key={habit.habit_id} className={`${styles.badge} ${habit.completed ? styles.tagSuccess : styles.tagWarning}`}>
                       {habit.habit_id}: {habit.completed ? 'done' : 'missed'}
                     </span>
                   ))}
@@ -533,48 +543,48 @@ export default function AppDashboard() {
           ))}
         </div>
 
-        <div style={{ border: '1px solid #e5e7eb', borderRadius: '10px', padding: '1rem', display: 'grid', gap: '0.75rem' }}>
-          <h2 style={{ margin: 0 }}>Trends</h2>
+        <div className={styles.card}>
+          <h2 className={styles.sectionTitle}>Trends</h2>
           {!analytics ? (
-            <p>Analytics unavailable</p>
+            <p className={styles.emptyState}>Analytics unavailable</p>
           ) : (
-            <div style={{ display: 'grid', gap: '0.5rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <div className={styles.card}>
+              <div className={styles.header}>
                 <span>Last 7 days</span>
                 <strong>{analytics.last7.entryCount} entries</strong>
               </div>
               {analytics.last7.metrics.map((metric) => (
-                <div key={`7-${metric.key}`} style={{ display: 'flex', justifyContent: 'space-between', color: '#4b5563' }}>
-                  <span>{metric.key}</span>
+                <div key={`7-${metric.key}`} className={styles.header}>
+                  <span className={styles.muted}>{metric.key}</span>
                   <span>
                     avg {metric.average?.toFixed(2) ?? '–'} ({metric.samples} samples)
                   </span>
                 </div>
               ))}
               {analytics.last7.habits.map((habit) => (
-                <div key={`7-${habit.habit_id}`} style={{ display: 'flex', justifyContent: 'space-between', color: '#4b5563' }}>
-                  <span>{habit.habit_id}</span>
+                <div key={`7-${habit.habit_id}`} className={styles.header}>
+                  <span className={styles.muted}>{habit.habit_id}</span>
                   <span>{Math.round(habit.completion_rate * 100)}% consistency</span>
                 </div>
               ))}
 
-              <hr />
+              <hr className={styles.divider} />
 
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <div className={styles.header}>
                 <span>Last 30 days</span>
                 <strong>{analytics.last30.entryCount} entries</strong>
               </div>
               {analytics.last30.metrics.map((metric) => (
-                <div key={`30-${metric.key}`} style={{ display: 'flex', justifyContent: 'space-between', color: '#4b5563' }}>
-                  <span>{metric.key}</span>
+                <div key={`30-${metric.key}`} className={styles.header}>
+                  <span className={styles.muted}>{metric.key}</span>
                   <span>
                     avg {metric.average?.toFixed(2) ?? '–'} ({metric.samples} samples)
                   </span>
                 </div>
               ))}
               {analytics.last30.habits.map((habit) => (
-                <div key={`30-${habit.habit_id}`} style={{ display: 'flex', justifyContent: 'space-between', color: '#4b5563' }}>
-                  <span>{habit.habit_id}</span>
+                <div key={`30-${habit.habit_id}`} className={styles.header}>
+                  <span className={styles.muted}>{habit.habit_id}</span>
                   <span>{Math.round(habit.completion_rate * 100)}% consistency</span>
                 </div>
               ))}
