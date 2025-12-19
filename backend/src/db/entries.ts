@@ -320,50 +320,150 @@ export async function listEntriesWithDetails(params: {
 export async function computeEntryAnalytics({
   userId,
   days,
+  from,
+  to,
+  metricKeys,
+  habitIds,
 }: {
   userId: string;
-  days: number;
+  days?: number;
+  from?: string;
+  to?: string;
+  metricKeys?: string[];
+  habitIds?: string[];
 }): Promise<{
   entryCount: number;
   metrics: MetricAverage[];
   habits: HabitConsistency[];
+  correlations: { metric: string; habit: string; correlation: number; samples: number }[];
 }> {
-  const params = [userId, days];
+  const params: any[] = [userId];
+  const entryWhere: string[] = ['e.user_id = $1'];
+
+  if (from) {
+    params.push(from);
+    entryWhere.push(`e.entry_date >= $${params.length}`);
+  } else if (days) {
+    params.push(days);
+    entryWhere.push(`e.entry_date >= (current_date - ($${params.length}::int - 1))`);
+  }
+
+  if (to) {
+    params.push(to);
+    entryWhere.push(`e.entry_date <= $${params.length}`);
+  }
+
+  const entryWhereClause = entryWhere.length ? `WHERE ${entryWhere.join(' AND ')}` : '';
+
+  const metricParams = [...params];
+  const metricWhere = [...entryWhere];
+  if (metricKeys && metricKeys.length > 0) {
+    metricParams.push(metricKeys);
+    metricWhere.push(`m.key = ANY($${metricParams.length})`);
+  }
+  metricWhere.push('m.value_num IS NOT NULL');
+  const metricWhereClause = metricWhere.length ? `WHERE ${metricWhere.join(' AND ')}` : '';
+
+  const habitParams = [...params];
+  const habitWhere = [...entryWhere];
+  if (habitIds && habitIds.length > 0) {
+    habitParams.push(habitIds);
+    habitWhere.push(`h.habit_id = ANY($${habitParams.length})`);
+  }
+  const habitWhereClause = habitWhere.length ? `WHERE ${habitWhere.join(' AND ')}` : '';
 
   const [entryCountResult, metricsResult, habitResult] = await Promise.all([
     pool.query<{ count: string }>(
       `SELECT COUNT(*)::int AS count
-       FROM entries
-       WHERE user_id = $1 AND entry_date >= (current_date - ($2::int - 1))`,
+       FROM entries e
+       ${entryWhereClause}
+      `,
       params
     ),
     pool.query<MetricAverage>(
       `SELECT m.key, AVG(m.value_num)::float AS average, COUNT(m.value_num)::int AS samples
        FROM entry_metrics m
        JOIN entries e ON e.id = m.entry_id
-       WHERE e.user_id = $1
-         AND m.value_num IS NOT NULL
-         AND e.entry_date >= (current_date - ($2::int - 1))
+       ${metricWhereClause}
        GROUP BY m.key
        ORDER BY m.key`,
-      params
+      metricParams
     ),
     pool.query<HabitConsistency>(
       `SELECT h.habit_id, AVG(CASE WHEN h.completed THEN 1 ELSE 0 END)::float AS completion_rate, COUNT(*)::int AS samples
        FROM entry_habits h
        JOIN entries e ON e.id = h.entry_id
-       WHERE e.user_id = $1
-         AND e.entry_date >= (current_date - ($2::int - 1))
+       ${habitWhereClause}
        GROUP BY h.habit_id
        ORDER BY h.habit_id`,
-      params
+      habitParams
     ),
   ]);
+
+  const effectiveFrom = from
+    ? from
+    : days
+      ? (() => {
+          const d = new Date();
+          d.setDate(d.getDate() - (days - 1));
+          return d.toISOString().slice(0, 10);
+        })()
+      : undefined;
+
+  const entriesForCorrelation = await listEntriesWithDetails({ userId, from: effectiveFrom, to });
+  const metricFilter = metricKeys && metricKeys.length > 0 ? new Set(metricKeys) : null;
+  const habitFilter = habitIds && habitIds.length > 0 ? new Set(habitIds) : null;
+  const pairs = new Map<string, { metric: string; habit: string; values: { x: number; y: number }[] }>();
+
+  for (const entry of entriesForCorrelation) {
+    const entryMetrics = entry.metrics.filter(
+      (m) => m.value_num !== null && (!metricFilter || metricFilter.has(m.key))
+    );
+    const entryHabits = entry.habits.filter((h) => !habitFilter || habitFilter.has(h.habit_id));
+
+    for (const metric of entryMetrics) {
+      for (const habit of entryHabits) {
+        const key = `${metric.key}::${habit.habit_id}`;
+        if (!pairs.has(key)) {
+          pairs.set(key, { metric: metric.key, habit: habit.habit_id, values: [] });
+        }
+        pairs.get(key)!.values.push({ x: habit.completed ? 1 : 0, y: metric.value_num as number });
+      }
+    }
+  }
+
+  const correlations: { metric: string; habit: string; correlation: number; samples: number }[] = [];
+
+  for (const pair of pairs.values()) {
+    const n = pair.values.length;
+    if (n < 2) continue;
+    const meanX = pair.values.reduce((sum, v) => sum + v.x, 0) / n;
+    const meanY = pair.values.reduce((sum, v) => sum + v.y, 0) / n;
+    let numerator = 0;
+    let denomX = 0;
+    let denomY = 0;
+    for (const v of pair.values) {
+      const dx = v.x - meanX;
+      const dy = v.y - meanY;
+      numerator += dx * dy;
+      denomX += dx * dx;
+      denomY += dy * dy;
+    }
+    const denominator = Math.sqrt(denomX * denomY);
+    if (!denominator) continue;
+    correlations.push({
+      metric: pair.metric,
+      habit: pair.habit,
+      correlation: Number((numerator / denominator).toFixed(3)),
+      samples: n,
+    });
+  }
 
   return {
     entryCount: Number(entryCountResult.rows[0]?.count ?? 0),
     metrics: metricsResult.rows,
     habits: habitResult.rows,
+    correlations,
   };
 }
 
