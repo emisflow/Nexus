@@ -11,10 +11,18 @@ import { getTokensForUser } from "../db/notifications.js";
 
 const redisUrl =
   process.env.UPSTASH_REDIS_URL ?? process.env.REDIS_URL ?? "redis://127.0.0.1:6379";
-const redisConnection = new IORedis(redisUrl, {
-  maxRetriesPerRequest: null,
-  enableReadyCheck: false,
-});
+
+let redisConnection: IORedis | null = null;
+function getRedisConnection() {
+  if (!redisConnection) {
+    redisConnection = new IORedis(redisUrl, {
+      maxRetriesPerRequest: null,
+      enableReadyCheck: false,
+    });
+  }
+
+  return redisConnection;
+}
 
 
 export type ReminderJobData = { reminderId: string };
@@ -26,15 +34,22 @@ export const defaultJobOptions: JobsOptions = {
   removeOnFail: false,
 };
 
-// Single queue instance reused by API routes and workers
-const remindersQueue = new Queue<ReminderJobData>("reminders", {
-  connection: redisConnection,
-  defaultJobOptions,
-});
+let remindersQueue: QueueType<ReminderJobData> | null = null;
+
+function getReminderQueue() {
+  if (!remindersQueue) {
+    remindersQueue = new Queue<ReminderJobData>("reminders", {
+      connection: getRedisConnection(),
+      defaultJobOptions,
+    });
+  }
+
+  return remindersQueue;
+}
 
 export function createQueues() {
   // ✅ BullMQ v2+ does NOT need QueueScheduler
-  return { reminders: remindersQueue };
+  return { reminders: getReminderQueue() };
 }
 
 export async function scheduleReminder(
@@ -53,22 +68,48 @@ export async function scheduleReminder(
   });
 }
 
-async function processReminder(job: Job<ReminderJobData>) {
-  const reminder = await getReminder(job.data.reminderId);
+export type ReminderJobDependencies = {
+  getReminder: typeof getReminder;
+  getTokensForUser: typeof getTokensForUser;
+  sendPushNotification: typeof sendPushNotification;
+  markLastSent: typeof markLastSent;
+  logJob: typeof logJob;
+  computeNextRun: typeof computeNextRun;
+  setNextRun: typeof setNextRun;
+  scheduleReminder: (payload: ReminderJobData, runAt: Date) => Promise<void>;
+};
+
+const defaultDeps: ReminderJobDependencies = {
+  getReminder,
+  getTokensForUser,
+  sendPushNotification,
+  markLastSent,
+  logJob,
+  computeNextRun,
+  setNextRun,
+  scheduleReminder: (payload, runAt) => scheduleReminder(getReminderQueue(), payload, runAt),
+};
+
+export async function processReminderJob(
+  reminderId: string,
+  deps: Partial<ReminderJobDependencies> = {}
+) {
+  const ctx = { ...defaultDeps, ...deps } satisfies ReminderJobDependencies;
+  const reminder = await ctx.getReminder(reminderId);
 
   if (!reminder || !reminder.enabled) {
-    await logJob({ jobType: "reminder.fire", status: "failed", error: "Reminder disabled or missing" });
-    return;
+    await ctx.logJob({ jobType: "reminder.fire", status: "failed", error: "Reminder disabled or missing" });
+    return { status: "skipped" as const };
   }
 
-  const tokens = await getTokensForUser(reminder.user_id);
+  const tokens = await ctx.getTokensForUser(reminder.user_id);
 
   try {
-    await sendPushNotification({ userId: reminder.user_id, message: reminder.type, tokens });
-    await markLastSent(reminder.id);
-    await logJob({ jobType: "reminder.fire", status: "success", userId: reminder.user_id });
+    await ctx.sendPushNotification({ userId: reminder.user_id, message: reminder.type, tokens });
+    await ctx.markLastSent(reminder.id);
+    await ctx.logJob({ jobType: "reminder.fire", status: "success", userId: reminder.user_id });
   } catch (error) {
-    await logJob({
+    await ctx.logJob({
       jobType: "reminder.fire",
       status: "failed",
       userId: reminder.user_id,
@@ -77,24 +118,30 @@ async function processReminder(job: Job<ReminderJobData>) {
     throw error;
   }
 
-  const nextRun = computeNextRun({
+  const nextRun = ctx.computeNextRun({
     hour: reminder.hour,
     minute: reminder.minute,
     timezone: reminder.timezone,
   });
 
-  await setNextRun(reminder.id, nextRun);
-  await scheduleReminder(remindersQueue, { reminderId: reminder.id }, nextRun);
+  await ctx.setNextRun(reminder.id, nextRun);
+  await ctx.scheduleReminder({ reminderId: reminder.id }, nextRun);
+
+  return { status: "scheduled" as const, nextRun };
 }
 
 export function startWorkers() {
   console.log(`[Worker] Connecting to Redis at ${redisUrl}`);
 
-  const reminderWorker = new Worker<ReminderJobData>("reminders", processReminder, {
-    connection: redisConnection,
-  });
+  const reminderWorker = new Worker<ReminderJobData>(
+    "reminders",
+    (job: Job<ReminderJobData>) => processReminderJob(job.data.reminderId),
+    {
+      connection: getRedisConnection(),
+    }
+  );
 
-  const events = new QueueEvents("reminders", { connection: redisConnection });
+  const events = new QueueEvents("reminders", { connection: getRedisConnection() });
 
   reminderWorker.on("failed", (job, err) => console.error(`[Worker] Job ${job?.id} failed`, err));
   reminderWorker.on("completed", (job) => console.log(`[Worker] Job ${job.id} completed`));

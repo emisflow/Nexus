@@ -140,6 +140,28 @@ app.delete('/api/reminders/:id', requireAuth(), async (req, res) => {
   res.json({ disabled: true });
 });
 
+app.post('/api/reminders/:id/fire', requireAuth(), async (req, res) => {
+  const userId = req.auth?.userId;
+  const reminderId = req.params.id;
+
+  if (!userId) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+
+  const user = await ensureUser(userId);
+  const reminder = await getReminder(reminderId);
+
+  if (!reminder || reminder.user_id !== user.id) {
+    res.status(404).json({ error: 'Reminder not found' });
+    return;
+  }
+
+  await scheduleReminder(queues.reminders, { reminderId: reminder.id }, new Date());
+
+  res.json({ scheduled: true, run_at: new Date().toISOString() });
+});
+
 app.post('/api/notifications/register', requireAuth(), async (req, res) => {
   const userId = req.auth?.userId;
   const { token, platform } = req.body as { token?: string; platform?: string };
