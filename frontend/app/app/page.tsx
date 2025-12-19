@@ -19,6 +19,7 @@ type AnalyticsBucket = {
   entryCount: number;
   metrics: { key: string; average: number | null; samples: number }[];
   habits: { habit_id: string; completion_rate: number; samples: number }[];
+  streaks: { current: number; longest: number };
 };
 
 type Conflict = {
@@ -28,6 +29,23 @@ type Conflict = {
   remote_version: string | null;
   status: string;
   entry_date: string;
+};
+
+type Template = {
+  id: string;
+  name: string;
+  metrics: { key: string; defaultValue?: number | null }[];
+  habits: { habitId: string; defaultCompleted?: boolean }[];
+};
+
+type Reminder = {
+  id: string;
+  type: string;
+  timezone: string;
+  hour: number;
+  minute: number;
+  enabled: boolean;
+  next_run_at: string | null;
 };
 
 export default function AppDashboard() {
@@ -50,6 +68,14 @@ export default function AppDashboard() {
   const [exportFrom, setExportFrom] = useState('');
   const [exportTo, setExportTo] = useState('');
   const [exportFormat, setExportFormat] = useState<'long' | 'wide'>('long');
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
+  const [templateName, setTemplateName] = useState('');
+  const [reminders, setReminders] = useState<Reminder[]>([]);
+  const [reminderHour, setReminderHour] = useState(20);
+  const [reminderMinute, setReminderMinute] = useState(0);
+  const [reminderTimezone, setReminderTimezone] = useState('UTC');
+  const [reminderStatus, setReminderStatus] = useState<string | null>(null);
 
   const loadEntries = async () => {
     const resp = await fetch('/api/entries');
@@ -79,10 +105,33 @@ export default function AppDashboard() {
     });
   };
 
+  const loadTemplates = async () => {
+    const resp = await fetch('/api/templates');
+    if (!resp.ok) throw new Error('Failed to load templates');
+    const data = (await resp.json()) as { templates: Template[] };
+    setTemplates(data.templates ?? []);
+  };
+
+  const handleDeleteTemplate = async (id: string) => {
+    const resp = await fetch(`/api/templates/${id}`, { method: 'DELETE' });
+    if (!resp.ok) {
+      setSaveError('Unable to delete template');
+      return;
+    }
+    await loadTemplates();
+  };
+
+  const loadReminders = async () => {
+    const resp = await fetch('/api/reminders');
+    if (!resp.ok) throw new Error('Failed to load reminders');
+    const data = (await resp.json()) as { reminders: Reminder[] };
+    setReminders(data.reminders ?? []);
+  };
+
   useEffect(() => {
     const bootstrap = async () => {
       try {
-        await Promise.all([loadEntries(), loadAnalytics(), loadConflicts()]);
+        await Promise.all([loadEntries(), loadAnalytics(), loadConflicts(), loadTemplates(), loadReminders()]);
       } catch (err) {
         setLoadError(err instanceof Error ? err.message : 'Something went wrong while loading data');
       } finally {
@@ -120,6 +169,55 @@ export default function AppDashboard() {
     );
     setBaseUpdatedAt(selectedEntry.updated_at);
   }, [selectedEntry]);
+
+  const applyTemplate = (templateId: string) => {
+    const template = templates.find((t) => t.id === templateId);
+    if (!template) return;
+
+    setMetrics(
+      template.metrics.length
+        ? template.metrics.map((metric) => ({ key: metric.key, value: (metric.defaultValue ?? '').toString() }))
+        : [{ key: '', value: '' }]
+    );
+    setHabits(
+      template.habits.length
+        ? template.habits.map((habit) => ({ habitId: habit.habitId, completed: habit.defaultCompleted ?? false }))
+        : [{ habitId: '', completed: false }]
+    );
+  };
+
+  const handleSaveTemplate = async () => {
+    setSaveMessage(null);
+    setSaveError(null);
+    if (!templateName.trim()) {
+      setSaveError('Name your template first.');
+      return;
+    }
+
+    const metricsPayload = metrics
+      .filter((m) => m.key.trim())
+      .map((m) => ({ key: m.key.trim(), defaultValue: m.value ? Number(m.value) : null }));
+    const habitsPayload = habits.filter((h) => h.habitId.trim()).map((h) => ({ habitId: h.habitId.trim(), defaultCompleted: h.completed }));
+
+    try {
+      const resp = await fetch('/api/templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: templateName.trim(), metrics: metricsPayload, habits: habitsPayload }),
+      });
+
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(text || 'Failed to save template');
+      }
+
+      await loadTemplates();
+      setTemplateName('');
+      setSaveMessage('Template saved for quick reuse.');
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Failed to save template');
+    }
+  };
 
   const handleSubmit = async () => {
     setSaveMessage(null);
@@ -254,6 +352,67 @@ export default function AppDashboard() {
     URL.revokeObjectURL(url);
   };
 
+  const handleReminderCreate = async () => {
+    setReminderStatus(null);
+    try {
+      const resp = await fetch('/api/reminders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'daily_journal',
+          hour: reminderHour,
+          minute: reminderMinute,
+          timezone: reminderTimezone,
+        }),
+      });
+
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(text || 'Failed to create reminder');
+      }
+
+      await loadReminders();
+      setReminderStatus('Reminder scheduled.');
+    } catch (error) {
+      setReminderStatus(error instanceof Error ? error.message : 'Unable to create reminder');
+    }
+  };
+
+  const handleDeleteReminder = async (id: string) => {
+    setReminderStatus(null);
+    const resp = await fetch(`/api/reminders/${id}`, { method: 'DELETE' });
+    if (!resp.ok) {
+      setReminderStatus('Unable to disable reminder.');
+      return;
+    }
+    await loadReminders();
+    setReminderStatus('Reminder disabled.');
+  };
+
+  const handleToggleReminder = async (reminder: Reminder) => {
+    setReminderStatus(null);
+    const resp = await fetch('/api/reminders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: reminder.id,
+        type: reminder.type,
+        hour: reminder.hour,
+        minute: reminder.minute,
+        timezone: reminder.timezone,
+        enabled: !reminder.enabled,
+      }),
+    });
+
+    if (!resp.ok) {
+      setReminderStatus('Unable to update reminder');
+      return;
+    }
+
+    await loadReminders();
+    setReminderStatus(`Reminder ${reminder.enabled ? 'paused' : 're-enabled'}.`);
+  };
+
   const preparedEntries = useMemo(() => entries.slice(0, 5), [entries]);
 
   if (loading) {
@@ -313,6 +472,72 @@ export default function AppDashboard() {
             {saveError ? <span className={`${styles.badge} ${styles.tagDanger}`}>{saveError}</span> : null}
           </div>
         </div>
+
+        <div className={styles.toolbar}>
+          <label className={styles.inputGroup}>
+            Quick template
+            <select
+              className={styles.select}
+              value={selectedTemplateId}
+              onChange={(e) => {
+                setSelectedTemplateId(e.target.value);
+                applyTemplate(e.target.value);
+              }}
+            >
+              <option value="">Choose…</option>
+              {templates.map((template) => (
+                <option key={template.id} value={template.id}>
+                  {template.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className={styles.inputGroup}>
+            Save current as template
+            <div className={styles.actionsRow}>
+              <input
+                className={styles.input}
+                placeholder="Template name"
+                value={templateName}
+                onChange={(e) => setTemplateName(e.target.value)}
+              />
+              <button className={`${styles.button} ${styles.buttonGhost}`} onClick={handleSaveTemplate}>
+                Save template
+              </button>
+            </div>
+          </label>
+        </div>
+
+        {templates.length > 0 ? (
+          <div className={styles.card}>
+            <div className={styles.header}>
+              <h4 className={styles.sectionTitle}>Saved templates</h4>
+              <p className={styles.helper}>Apply or delete presets you no longer need.</p>
+            </div>
+            {templates.map((template) => (
+              <div key={template.id} className={styles.listRow}>
+                <div>
+                  <strong>{template.name}</strong>
+                  <p className={styles.helper}>
+                    {template.metrics.length} metrics · {template.habits.length} habits
+                  </p>
+                </div>
+                <div className={styles.actionsRow}>
+                  <button className={`${styles.button} ${styles.buttonGhost}`} onClick={() => applyTemplate(template.id)}>
+                    Apply
+                  </button>
+                  <button
+                    className={`${styles.button} ${styles.buttonGhost}`}
+                    onClick={() => handleDeleteTemplate(template.id)}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
         <label className={styles.inputGroup}>
           Entry date
           <input className={styles.input} type="date" value={entryDate} onChange={(e) => setEntryDate(e.target.value)} />
@@ -336,6 +561,17 @@ export default function AppDashboard() {
             </button>
           </div>
           <p className={styles.helper}>Choose from your template or enter a custom metric.</p>
+          <div className={styles.pillGroup}>
+            {metricTemplates.map((template) => (
+              <button
+                key={template.key}
+                className={styles.pillButton}
+                onClick={() => setMetrics((prev) => [...prev, { key: template.key, value: template.placeholder || '' }])}
+              >
+                {template.label}
+              </button>
+            ))}
+          </div>
           <datalist id="metric-options">
             {metricTemplates.map((template) => (
               <option key={template.key} value={template.key}>
@@ -389,6 +625,17 @@ export default function AppDashboard() {
             </button>
           </div>
           <p className={styles.helper}>Pick from common habits or add your own identifier.</p>
+          <div className={styles.pillGroup}>
+            {habitTemplates.map((habit) => (
+              <button
+                key={habit.id}
+                className={styles.pillButton}
+                onClick={() => setHabits((prev) => [...prev, { habitId: habit.id, completed: true }])}
+              >
+                {habit.label}
+              </button>
+            ))}
+          </div>
           <datalist id="habit-options">
             {habitTemplates.map((habit) => (
               <option key={habit.id} value={habit.id}>
@@ -544,11 +791,20 @@ export default function AppDashboard() {
         </div>
 
         <div className={styles.card}>
-          <h2 className={styles.sectionTitle}>Trends</h2>
+          <h2 className={styles.sectionTitle}>Trends & streaks</h2>
           {!analytics ? (
             <p className={styles.emptyState}>Analytics unavailable</p>
           ) : (
             <div className={styles.card}>
+              <div className={styles.header}>
+                <span>Current streak</span>
+                <strong>{analytics.last30.streaks.current} days</strong>
+              </div>
+              <div className={styles.header}>
+                <span>Longest streak</span>
+                <strong>{analytics.last30.streaks.longest} days</strong>
+              </div>
+
               <div className={styles.header}>
                 <span>Last 7 days</span>
                 <strong>{analytics.last7.entryCount} entries</strong>
@@ -589,6 +845,92 @@ export default function AppDashboard() {
                 </div>
               ))}
             </div>
+          )}
+        </div>
+      </section>
+
+      <section className={styles.gridTwoColumn}>
+        <div className={styles.card}>
+          <h2 className={styles.sectionTitle}>Reminder schedule</h2>
+          <p className={styles.helper}>Keep your streak going with daily pings.</p>
+          <div className={styles.toolbar}>
+            <label className={styles.inputGroup}>
+              Hour
+              <input
+                className={styles.input}
+                type="number"
+                min={0}
+                max={23}
+                value={reminderHour}
+                onChange={(e) => setReminderHour(Number(e.target.value))}
+              />
+            </label>
+            <label className={styles.inputGroup}>
+              Minute
+              <input
+                className={styles.input}
+                type="number"
+                min={0}
+                max={59}
+                value={reminderMinute}
+                onChange={(e) => setReminderMinute(Number(e.target.value))}
+              />
+            </label>
+            <label className={styles.inputGroup}>
+              Timezone
+              <input
+                className={styles.input}
+                value={reminderTimezone}
+                onChange={(e) => setReminderTimezone(e.target.value)}
+                placeholder="UTC"
+              />
+            </label>
+            <button className={styles.button} onClick={handleReminderCreate}>
+              Schedule daily reminder
+            </button>
+          </div>
+          {reminderStatus ? <p className={styles.helper}>{reminderStatus}</p> : null}
+          <div className={styles.card}>
+            {reminders.length === 0 ? <p className={styles.emptyState}>No reminders yet.</p> : null}
+            {reminders.map((reminder) => (
+              <div key={reminder.id} className={styles.listRow}>
+                <div>
+                  <strong>{reminder.type}</strong>
+                  <p className={styles.helper}>
+                    {String(reminder.hour).padStart(2, '0')}:{String(reminder.minute).padStart(2, '0')} ({reminder.timezone})
+                  </p>
+                  <p className={styles.helper}>
+                    Next run: {reminder.next_run_at ? new Date(reminder.next_run_at).toLocaleString() : 'not scheduled'}
+                  </p>
+                </div>
+                <div className={styles.actionsRow}>
+                  <span className={`${styles.badge} ${reminder.enabled ? styles.tagSuccess : styles.tagWarning}`}>
+                    {reminder.enabled ? 'enabled' : 'paused'}
+                  </span>
+                  <button className={`${styles.button} ${styles.buttonGhost}`} onClick={() => handleToggleReminder(reminder)}>
+                    {reminder.enabled ? 'Pause' : 'Resume'}
+                  </button>
+                  <button
+                    className={`${styles.button} ${styles.buttonGhost}`}
+                    onClick={() => handleDeleteReminder(reminder.id)}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className={styles.card}>
+          <h2 className={styles.sectionTitle}>Correlation insights</h2>
+          {!analytics || analytics.last30.metrics.length === 0 || analytics.last30.habits.length === 0 ? (
+            <p className={styles.emptyState}>Log both metrics and habits to see correlations.</p>
+          ) : (
+            <p className={styles.helper}>
+              Use exports to analyze correlations deeper in Excel/BI tools. Metrics and habits are synced with your templates and
+              reminders to keep the data tidy.
+            </p>
           )}
         </div>
       </section>

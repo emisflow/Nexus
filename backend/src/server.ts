@@ -24,6 +24,7 @@ import {
   getEntryWithConflicts,
   computeEntryAnalytics,
 } from './db/entries.js';
+import { deleteTemplate, listTemplates, upsertTemplate } from './db/templates.js';
 
 export const app = express();
 const port = process.env.PORT ? Number(process.env.PORT) : 3000;
@@ -279,6 +280,67 @@ app.get('/api/analytics', requireAuth(), async (_req, res) => {
   ]);
 
   res.json({ last7, last30 });
+});
+
+app.get('/api/templates', requireAuth(), async (req, res) => {
+  const userId = req.auth?.userId;
+
+  if (!userId) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+
+  const user = await ensureUser(userId);
+  const templates = await listTemplates(user.id);
+  res.json({ templates });
+});
+
+app.post('/api/templates', requireAuth(), async (req, res) => {
+  const userId = req.auth?.userId;
+  const { id, name, metrics, habits } = req.body as {
+    id?: string;
+    name?: string;
+    metrics?: { key: string; defaultValue?: number | null }[];
+    habits?: { habitId: string; defaultCompleted?: boolean }[];
+  };
+
+  if (!userId) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+
+  if (!name) {
+    res.status(400).json({ error: 'name is required' });
+    return;
+  }
+
+  const user = await ensureUser(userId);
+  try {
+    const template = await upsertTemplate({ id, userId: user.id, name, metrics, habits });
+    res.json({ template });
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to save template' });
+  }
+});
+
+app.delete('/api/templates/:id', requireAuth(), async (req, res) => {
+  const userId = req.auth?.userId;
+  const { id } = req.params;
+
+  if (!userId) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+
+  const user = await ensureUser(userId);
+  const deleted = await deleteTemplate({ id, userId: user.id });
+
+  if (!deleted) {
+    res.status(404).json({ error: 'Template not found' });
+    return;
+  }
+
+  res.json({ deleted: true });
 });
 
 app.get('/api/entries/export', requireAuth(), async (req, res) => {

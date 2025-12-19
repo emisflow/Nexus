@@ -5,17 +5,18 @@
 - Frontend: `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `NEXT_PUBLIC_ONESIGNAL_APP_ID` (OneSignal web push), and matching Clerk settings.
 
 ## Migrations
-Run the SQL migration against Postgres:
+Run the SQL migrations against Postgres (in order):
 
 ```
 psql $DATABASE_URL -f backend/src/db/migrations/001_init.sql
+psql $DATABASE_URL -f backend/src/db/migrations/002_templates.sql
 ```
 
 ## Running locally
 - API: `cd backend && npm install && npm run dev`
 - Worker (reminders): `cd backend && npm run worker:reminders` (must have Redis/Upstash reachable)
 - Frontend: `cd frontend && npm install && npm run dev`
-- Tests (backend): `cd backend && npm test`
+- Tests (backend): `cd backend && npm test` (run `npm install` first to pull dev deps like supertest)
 
 Keep the worker running in a separate process; in deploy, run it as a separate dyno/container so BullMQ jobs are processed.
 

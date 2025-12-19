@@ -90,6 +90,11 @@ export type HabitConsistency = {
   samples: number;
 };
 
+export type StreakSummary = {
+  current: number;
+  longest: number;
+};
+
 function normalizeText(text?: string | null): string {
   if (!text) return '';
   return text.replace(/[\s\p{P}]/gu, '').toLowerCase();
@@ -340,6 +345,7 @@ export async function computeEntryAnalytics({
   metrics: MetricAverage[];
   habits: HabitConsistency[];
   correlations: { metric: string; habit: string; correlation: number; samples: number }[];
+  streaks: StreakSummary;
 }> {
   const params: any[] = [userId];
   const entryWhere: string[] = ['e.user_id = $1'];
@@ -468,7 +474,45 @@ export async function computeEntryAnalytics({
     metrics: metricsResult.rows,
     habits: habitResult.rows,
     correlations,
+    streaks: await computeStreaks(userId),
   };
+}
+
+export async function computeStreaks(userId: string): Promise<StreakSummary> {
+  const result = await pool.query<{ entry_date: string }>(
+    `SELECT entry_date FROM entries WHERE user_id = $1 ORDER BY entry_date DESC`,
+    [userId]
+  );
+
+  let current = 0;
+  let longest = 0;
+
+  let lastDate: Date | null = null;
+
+  for (const row of result.rows) {
+    const date = new Date(row.entry_date);
+
+    if (!lastDate) {
+      current = 1;
+      longest = 1;
+      lastDate = date;
+      continue;
+    }
+
+    const diffMs = lastDate.getTime() - date.getTime();
+    const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+
+    if (diffDays === 1) {
+      current += 1;
+    } else if (diffDays > 1) {
+      current = 1;
+    }
+
+    longest = Math.max(longest, current);
+    lastDate = date;
+  }
+
+  return { current, longest };
 }
 
 export async function listConflicts(userId: string): Promise<ConflictRow[]> {
