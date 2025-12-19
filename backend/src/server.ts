@@ -25,7 +25,7 @@ import {
   computeEntryAnalytics,
 } from './db/entries.js';
 
-const app = express();
+export const app = express();
 const port = process.env.PORT ? Number(process.env.PORT) : 3000;
 
 app.use(express.json());
@@ -189,7 +189,7 @@ app.post('/api/entries', requireAuth(), async (req, res) => {
     return;
   }
 
-  await ensureUser(userId);
+  const user = await ensureUser(userId);
 
   const { entryDate, templateId, journalText, metrics, habits, baseUpdatedAt } = req.body as {
     entryDate?: string;
@@ -206,7 +206,7 @@ app.post('/api/entries', requireAuth(), async (req, res) => {
   }
 
   const result = await upsertEntryWithConflict({
-    userId,
+    userId: user.id,
     entryDate,
     templateId,
     journalText,
@@ -398,13 +398,15 @@ app.get('/api/conflicts', requireAuth(), async (req, res) => {
 });
 
 app.post('/api/conflicts/:id/resolve', requireAuth(), async (req, res) => {
-  const userId = req.auth?.userId;
+  const clerkUserId = req.auth?.userId;
   const { action, mergedText } = req.body as { action?: string; mergedText?: string };
 
-  if (!userId) {
+  if (!clerkUserId) {
     res.status(401).json({ error: 'Unauthorized' });
     return;
   }
+
+  const user = await ensureUser(clerkUserId);
 
   if (!action || !['keep_current', 'use_other', 'merge_manual'].includes(action)) {
     res.status(400).json({ error: 'action must be keep_current, use_other, or merge_manual' });
@@ -414,7 +416,7 @@ app.post('/api/conflicts/:id/resolve', requireAuth(), async (req, res) => {
   try {
     const result = await resolveConflict({
       conflictId: req.params.id,
-      userId,
+      userId: user.id,
       action: action as 'keep_current' | 'use_other' | 'merge_manual',
       mergedText,
     });
@@ -450,6 +452,10 @@ app.post('/notifications/instant', requireAuth(), async (req, res) => {
   res.json({ sent: true });
 });
 
-app.listen(port, () => {
-  console.log(`API listening on port ${port}`);
-});
+if (process.env.NODE_ENV !== 'test') {
+  app.listen(port, () => {
+    console.log(`API listening on port ${port}`);
+  });
+}
+
+export default app;

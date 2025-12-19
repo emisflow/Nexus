@@ -144,11 +144,13 @@ async function fetchMetricsByEntryIds(entryIds: string[]): Promise<Map<string, M
 
   if (entryIds.length === 0) return map;
 
+  const placeholders = entryIds.map((_, idx) => `$${idx + 1}::uuid`).join(', ');
+
   const result = await pool.query<MetricRow>(
     `SELECT entry_id, key, value_num, value_text
      FROM entry_metrics
-     WHERE entry_id = ANY($1)`,
-    [entryIds]
+     WHERE entry_id IN (${placeholders})`,
+    entryIds
   );
 
   for (const row of result.rows) {
@@ -165,11 +167,13 @@ async function fetchHabitsByEntryIds(entryIds: string[]): Promise<Map<string, Ha
 
   if (entryIds.length === 0) return map;
 
+  const placeholders = entryIds.map((_, idx) => `$${idx + 1}::uuid`).join(', ');
+
   const result = await pool.query<HabitRow>(
     `SELECT entry_id, habit_id, completed
      FROM entry_habits
-     WHERE entry_id = ANY($1)`,
-    [entryIds]
+     WHERE entry_id IN (${placeholders})`,
+    entryIds
   );
 
   for (const row of result.rows) {

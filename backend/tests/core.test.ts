@@ -1,35 +1,5 @@
-import { describe, expect, it, beforeAll, vi } from 'vitest';
-
-// Prepare in-memory pg and mock the pg module before importing code that creates pools.
-const { mem } = vi.hoisted(() => {
-  const { newDb } = require('pg-mem');
-  const { randomUUID } = require('crypto');
-  const { readFileSync } = require('fs');
-  const path = require('path');
-
-  const memDb = newDb({ autoCreateForeignKeyIndices: true });
-
-  memDb.public.registerFunction({
-    name: 'gen_random_uuid',
-    returns: 'uuid',
-    implementation: randomUUID,
-  });
-
-  const migrationSql = readFileSync(path.join(__dirname, '../src/db/migrations/001_init.sql'), 'utf8').replace(
-    /CREATE EXTENSION[^;]+;/g,
-    ''
-  );
-  memDb.public.none(migrationSql);
-
-  return { mem: memDb };
-});
-
-vi.mock('pg', () => {
-  const pg = mem.adapters.createPg();
-  return { Pool: pg.Pool };
-});
-
-// Import after mocks
+import { beforeEach, describe, expect, it } from 'vitest';
+import { resetDb } from './testDb.js';
 import { computeNextRun } from '../src/db/reminders.js';
 import { pool } from '../src/db/client.js';
 import { upsertEntryWithConflict, resolveConflict } from '../src/db/entries.js';
@@ -51,7 +21,8 @@ describe('reminder scheduling', () => {
 });
 
 describe('conflict creation and resolution', () => {
-  beforeAll(async () => {
+  beforeEach(async () => {
+    resetDb();
     await pool.query('INSERT INTO users (id, clerk_user_id) VALUES ($1, $2)', [userId, 'clerk_user']);
   });
 
