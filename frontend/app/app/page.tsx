@@ -45,6 +45,9 @@ export default function AppDashboard() {
   const [mergeDrafts, setMergeDrafts] = useState<Record<string, string>>({});
   const [analytics, setAnalytics] = useState<{ last7: AnalyticsBucket; last30: AnalyticsBucket } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [exportFrom, setExportFrom] = useState('');
+  const [exportTo, setExportTo] = useState('');
+  const [exportFormat, setExportFormat] = useState<'long' | 'wide'>('long');
 
   const loadEntries = async () => {
     const resp = await fetch('/api/entries');
@@ -229,7 +232,13 @@ export default function AppDashboard() {
   };
 
   const handleExport = async () => {
-    const resp = await fetch('/api/entries/export');
+    const params = new URLSearchParams();
+
+    if (exportFrom) params.set('from', exportFrom);
+    if (exportTo) params.set('to', exportTo);
+    if (exportFormat === 'wide') params.set('format', 'wide');
+
+    const resp = await fetch(`/api/entries/export${params.size ? `?${params.toString()}` : ''}`);
     if (!resp.ok) {
       setSaveError('Export failed');
       return;
@@ -238,7 +247,7 @@ export default function AppDashboard() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'entries.csv';
+    a.download = exportFormat === 'wide' ? 'entries-wide.csv' : 'entries.csv';
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -256,7 +265,22 @@ export default function AppDashboard() {
           <p style={{ color: '#6b7280', margin: 0 }}>Welcome back</p>
           <h1 style={{ margin: 0 }}>Daily dashboard</h1>
         </div>
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+            From
+            <input type="date" value={exportFrom} onChange={(e) => setExportFrom(e.target.value)} />
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+            To
+            <input type="date" value={exportTo} onChange={(e) => setExportTo(e.target.value)} />
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+            Format
+            <select value={exportFormat} onChange={(e) => setExportFormat(e.target.value as 'long' | 'wide')}>
+              <option value="long">Long (metrics/habits as JSON)</option>
+              <option value="wide">Wide (columns per metric/habit)</option>
+            </select>
+          </label>
           <button onClick={handleExport}>Export CSV</button>
         </div>
       </header>
