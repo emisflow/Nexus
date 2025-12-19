@@ -219,6 +219,37 @@ app.get('/api/analytics', requireAuth(), async (_req, res) => {
   }
 
   const user = await ensureUser(userId);
+  const { days, from, to, metrics, habits, mode } = _req.query as {
+    days?: string;
+    from?: string;
+    to?: string;
+    metrics?: string;
+    habits?: string;
+    mode?: string;
+  };
+
+  const metricKeys = metrics ? metrics.split(',').filter(Boolean) : undefined;
+  const habitIds = habits ? habits.split(',').filter(Boolean) : undefined;
+
+  if (days || from || to || metricKeys || habitIds || mode === 'range') {
+    const parsedDays = days ? Number(days) : undefined;
+    if (days && (!Number.isFinite(parsedDays) || parsedDays! <= 0)) {
+      res.status(400).json({ error: 'days must be a positive number' });
+      return;
+    }
+
+    const range = await computeEntryAnalytics({
+      userId: user.id,
+      days: parsedDays,
+      from: from || undefined,
+      to: to || undefined,
+      metricKeys,
+      habitIds,
+    });
+
+    res.json({ range });
+    return;
+  }
 
   const [last7, last30] = await Promise.all([
     computeEntryAnalytics({ userId: user.id, days: 7 }),
