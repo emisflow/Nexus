@@ -290,12 +290,59 @@ app.get('/api/entries/export', requireAuth(), async (req, res) => {
   }
 
   const user = await ensureUser(userId);
-  const { from, to } = req.query as { from?: string; to?: string };
+  const { from, to, format } = req.query as { from?: string; to?: string; format?: string };
   const entries = await listEntriesWithDetails({ userId: user.id, from, to });
 
-  const header = ['entry_date', 'journal_text', 'metrics_json', 'habits_json', 'created_at', 'updated_at'];
-
   const escape = (value: string) => `"${value.replace(/"/g, '""')}"`;
+  const formatCell = (value: string | number | boolean | null | undefined) => {
+    if (value === null || value === undefined) return '';
+    if (typeof value === 'number') return value.toString();
+    return escape(String(value));
+  };
+
+  if (format === 'wide') {
+    const metricKeys = Array.from(new Set(entries.flatMap((entry) => entry.metrics.map((m) => m.key)))).sort();
+    const habitIds = Array.from(new Set(entries.flatMap((entry) => entry.habits.map((h) => h.habit_id)))).sort();
+
+    const header = [
+      'entry_date',
+      'journal_text',
+      ...metricKeys.map((key) => `metric:${key}`),
+      ...habitIds.map((habitId) => `habit:${habitId}`),
+      'created_at',
+      'updated_at',
+    ];
+
+    const rows = entries.map((entry) => {
+      const metricMap = new Map(entry.metrics.map((m) => [m.key, m] as const));
+      const habitMap = new Map(entry.habits.map((h) => [h.habit_id, h.completed] as const));
+
+      const metricValues = metricKeys.map((key) => {
+        const metric = metricMap.get(key);
+        return metric?.value_num ?? metric?.value_text ?? '';
+      });
+
+      const habitValues = habitIds.map((habitId) => habitMap.get(habitId) ?? '');
+
+      return [
+        entry.entry_date,
+        formatCell(entry.journal_text ?? ''),
+        ...metricValues.map((value) => formatCell(value)),
+        ...habitValues.map((value) => formatCell(value)),
+        entry.created_at,
+        entry.updated_at,
+      ].join(',');
+    });
+
+    const csv = [header.join(','), ...rows].join('\n');
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="entries-wide.csv"');
+    res.send(csv);
+    return;
+  }
+
+  const header = ['entry_date', 'journal_text', 'metrics_json', 'habits_json', 'created_at', 'updated_at'];
 
   const rows = entries.map((entry) => {
     const metrics = entry.metrics.map((m) => ({ key: m.key, value_num: m.value_num, value_text: m.value_text }));
