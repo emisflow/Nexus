@@ -17,11 +17,12 @@ import { ensureUser } from './db/users.js';
 import { upsertReminder, listReminders, computeNextRun, disableReminder, getReminder } from './db/reminders.js';
 import { upsertNotificationToken, getTokensForUser } from './db/notifications.js';
 import {
-  listEntries,
+  listEntriesWithDetails,
   upsertEntryWithConflict,
   listConflicts,
   resolveConflict,
   getEntryWithConflicts,
+  computeEntryAnalytics,
 } from './db/entries.js';
 
 const app = express();
@@ -205,8 +206,62 @@ app.get('/api/entries', requireAuth(), async (_req, res) => {
 
   const user = await ensureUser(userId);
   const { from, to } = _req.query as { from?: string; to?: string };
-  const entries = await listEntries({ userId: user.id, from, to });
+  const entries = await listEntriesWithDetails({ userId: user.id, from, to });
   res.json({ entries });
+});
+
+app.get('/api/analytics', requireAuth(), async (_req, res) => {
+  const userId = _req.auth?.userId;
+
+  if (!userId) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+
+  const user = await ensureUser(userId);
+
+  const [last7, last30] = await Promise.all([
+    computeEntryAnalytics({ userId: user.id, days: 7 }),
+    computeEntryAnalytics({ userId: user.id, days: 30 }),
+  ]);
+
+  res.json({ last7, last30 });
+});
+
+app.get('/api/entries/export', requireAuth(), async (req, res) => {
+  const userId = req.auth?.userId;
+
+  if (!userId) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+
+  const user = await ensureUser(userId);
+  const { from, to } = req.query as { from?: string; to?: string };
+  const entries = await listEntriesWithDetails({ userId: user.id, from, to });
+
+  const header = ['entry_date', 'journal_text', 'metrics_json', 'habits_json', 'created_at', 'updated_at'];
+
+  const escape = (value: string) => `"${value.replace(/"/g, '""')}"`;
+
+  const rows = entries.map((entry) => {
+    const metrics = entry.metrics.map((m) => ({ key: m.key, value_num: m.value_num, value_text: m.value_text }));
+    const habits = entry.habits.map((h) => ({ habit_id: h.habit_id, completed: h.completed }));
+    return [
+      entry.entry_date,
+      escape(entry.journal_text ?? ''),
+      escape(JSON.stringify(metrics)),
+      escape(JSON.stringify(habits)),
+      entry.created_at,
+      entry.updated_at,
+    ].join(',');
+  });
+
+  const csv = [header.join(','), ...rows].join('\n');
+
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', 'attachment; filename="entries.csv"');
+  res.send(csv);
 });
 
 app.get('/api/entries/:id', requireAuth(), async (req, res) => {

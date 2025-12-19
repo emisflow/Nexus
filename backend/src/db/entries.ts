@@ -11,6 +11,19 @@ export type EntryRow = {
   updated_at: string;
 };
 
+export type MetricRow = {
+  entry_id: string;
+  key: string;
+  value_num: number | null;
+  value_text: string | null;
+};
+
+export type HabitRow = {
+  entry_id: string;
+  habit_id: string;
+  completed: boolean;
+};
+
 export type ConflictRow = {
   id: string;
   entry_id: string;
@@ -60,6 +73,23 @@ export type HabitInput = {
   completed: boolean;
 };
 
+export type EntryWithDetails = EntryRow & {
+  metrics: MetricRow[];
+  habits: HabitRow[];
+};
+
+export type MetricAverage = {
+  key: string;
+  average: number | null;
+  samples: number;
+};
+
+export type HabitConsistency = {
+  habit_id: string;
+  completion_rate: number;
+  samples: number;
+};
+
 function normalizeText(text?: string | null): string {
   if (!text) return '';
   return text.replace(/[\s\p{P}]/gu, '').toLowerCase();
@@ -107,6 +137,48 @@ async function upsertHabits(client: PoolClient, entryId: string, habits?: HabitI
     `INSERT INTO entry_habits (entry_id, habit_id, completed) VALUES ${rows.join(', ')}`,
     values
   );
+}
+
+async function fetchMetricsByEntryIds(entryIds: string[]): Promise<Map<string, MetricRow[]>> {
+  const map = new Map<string, MetricRow[]>();
+
+  if (entryIds.length === 0) return map;
+
+  const result = await pool.query<MetricRow>(
+    `SELECT entry_id, key, value_num, value_text
+     FROM entry_metrics
+     WHERE entry_id = ANY($1)`,
+    [entryIds]
+  );
+
+  for (const row of result.rows) {
+    const list = map.get(row.entry_id) ?? [];
+    list.push(row);
+    map.set(row.entry_id, list);
+  }
+
+  return map;
+}
+
+async function fetchHabitsByEntryIds(entryIds: string[]): Promise<Map<string, HabitRow[]>> {
+  const map = new Map<string, HabitRow[]>();
+
+  if (entryIds.length === 0) return map;
+
+  const result = await pool.query<HabitRow>(
+    `SELECT entry_id, habit_id, completed
+     FROM entry_habits
+     WHERE entry_id = ANY($1)`,
+    [entryIds]
+  );
+
+  for (const row of result.rows) {
+    const list = map.get(row.entry_id) ?? [];
+    list.push(row);
+    map.set(row.entry_id, list);
+  }
+
+  return map;
 }
 
 export async function upsertEntryWithConflict({
@@ -223,6 +295,76 @@ export async function listEntries({
   );
 
   return result.rows;
+}
+
+export async function listEntriesWithDetails(params: {
+  userId: string;
+  from?: string;
+  to?: string;
+}): Promise<EntryWithDetails[]> {
+  const entries = await listEntries(params);
+  const entryIds = entries.map((entry) => entry.id);
+
+  const [metricsMap, habitsMap] = await Promise.all([
+    fetchMetricsByEntryIds(entryIds),
+    fetchHabitsByEntryIds(entryIds),
+  ]);
+
+  return entries.map((entry) => ({
+    ...entry,
+    metrics: metricsMap.get(entry.id) ?? [],
+    habits: habitsMap.get(entry.id) ?? [],
+  }));
+}
+
+export async function computeEntryAnalytics({
+  userId,
+  days,
+}: {
+  userId: string;
+  days: number;
+}): Promise<{
+  entryCount: number;
+  metrics: MetricAverage[];
+  habits: HabitConsistency[];
+}> {
+  const params = [userId, days];
+
+  const [entryCountResult, metricsResult, habitResult] = await Promise.all([
+    pool.query<{ count: string }>(
+      `SELECT COUNT(*)::int AS count
+       FROM entries
+       WHERE user_id = $1 AND entry_date >= (current_date - ($2::int - 1))`,
+      params
+    ),
+    pool.query<MetricAverage>(
+      `SELECT m.key, AVG(m.value_num)::float AS average, COUNT(m.value_num)::int AS samples
+       FROM entry_metrics m
+       JOIN entries e ON e.id = m.entry_id
+       WHERE e.user_id = $1
+         AND m.value_num IS NOT NULL
+         AND e.entry_date >= (current_date - ($2::int - 1))
+       GROUP BY m.key
+       ORDER BY m.key`,
+      params
+    ),
+    pool.query<HabitConsistency>(
+      `SELECT h.habit_id, AVG(CASE WHEN h.completed THEN 1 ELSE 0 END)::float AS completion_rate, COUNT(*)::int AS samples
+       FROM entry_habits h
+       JOIN entries e ON e.id = h.entry_id
+       WHERE e.user_id = $1
+         AND e.entry_date >= (current_date - ($2::int - 1))
+       GROUP BY h.habit_id
+       ORDER BY h.habit_id`,
+      params
+    ),
+  ]);
+
+  return {
+    entryCount: Number(entryCountResult.rows[0]?.count ?? 0),
+    metrics: metricsResult.rows,
+    habits: habitResult.rows,
+  };
 }
 
 export async function listConflicts(userId: string): Promise<ConflictRow[]> {
