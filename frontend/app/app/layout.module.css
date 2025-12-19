@@ -1,0 +1,116 @@
+.shell {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  min-height: 100vh;
+  background: radial-gradient(circle at 0% 0%, rgba(99, 102, 241, 0.08), transparent 40%), var(--bg);
+}
+
+.sidebar {
+  border-right: 1px solid var(--border);
+  padding: 1.5rem 1rem;
+  display: grid;
+  gap: 1rem;
+  background: rgba(11, 18, 34, 0.85);
+}
+
+.brand {
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.navSection {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.navItem {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 12px;
+  color: #e2e8f0;
+  text-decoration: none;
+  border: 1px solid transparent;
+}
+
+.navItemActive {
+  background: rgba(99, 102, 241, 0.12);
+  border-color: rgba(99, 102, 241, 0.35);
+  color: #c7d2fe;
+}
+
+.main {
+  padding: 1.5rem 1.75rem 2rem;
+  display: grid;
+  gap: 1rem;
+}
+
+.breadcrumbs {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.breadcrumbCurrent {
+  color: #e2e8f0;
+  font-weight: 600;
+}
+
+.topBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  position: sticky;
+  top: 0;
+  padding: 0.75rem 0;
+  background: linear-gradient(var(--bg), rgba(15, 23, 42, 0.92));
+  z-index: 10;
+}
+
+.statusPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  color: #e2e8f0;
+}
+
+@media (max-width: 960px) {
+  .shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: center;
+  }
+
+  .navSection {
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  }
+
+  .navItem {
+    justify-content: center;
+  }
+}
+
+@media (max-width: 640px) {
+  .topBar {
+    position: static;
+  }
+
+  .main {
+    padding: 1.25rem;
+  }
+}
