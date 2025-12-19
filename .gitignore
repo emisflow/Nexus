@@ -5,3 +5,4 @@ dist
 backend/dist
 .env
 backend/.env
+frontend/.env.local
