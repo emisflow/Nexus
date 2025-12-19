@@ -1,26 +1,33 @@
 import { describe, expect, it, beforeAll, vi } from 'vitest';
-import { readFileSync } from 'fs';
-import path from 'path';
-import { newDb } from 'pg-mem';
-import { randomUUID } from 'crypto';
 
 // Prepare in-memory pg and mock the pg module before importing code that creates pools.
-const mem = newDb({ autoCreateForeignKeyIndices: true });
-const pg = mem.adapters.createPg();
-vi.mock('pg', () => ({ Pool: pg.Pool }));
+const { mem } = vi.hoisted(() => {
+  const { newDb } = require('pg-mem');
+  const { randomUUID } = require('crypto');
+  const { readFileSync } = require('fs');
+  const path = require('path');
 
-// Apply migration to in-memory DB (strip extensions/defaults not supported in pg-mem)
-mem.public.registerFunction({
-  name: 'gen_random_uuid',
-  returns: 'uuid',
-  implementation: randomUUID,
+  const memDb = newDb({ autoCreateForeignKeyIndices: true });
+
+  memDb.public.registerFunction({
+    name: 'gen_random_uuid',
+    returns: 'uuid',
+    implementation: randomUUID,
+  });
+
+  const migrationSql = readFileSync(path.join(__dirname, '../src/db/migrations/001_init.sql'), 'utf8').replace(
+    /CREATE EXTENSION[^;]+;/g,
+    ''
+  );
+  memDb.public.none(migrationSql);
+
+  return { mem: memDb };
 });
 
-const migrationSql = readFileSync(path.join(__dirname, '../src/db/migrations/001_init.sql'), 'utf8').replace(
-  /CREATE EXTENSION[^;]+;/g,
-  ''
-);
-mem.public.none(migrationSql);
+vi.mock('pg', () => {
+  const pg = mem.adapters.createPg();
+  return { Pool: pg.Pool };
+});
 
 // Import after mocks
 import { computeNextRun } from '../src/db/reminders.js';

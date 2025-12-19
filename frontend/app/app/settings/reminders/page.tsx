@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 
 const DEFAULT_TZ = 'Asia/Dubai';
 
@@ -84,11 +84,20 @@ async function deleteReminder(id: string) {
   }
 }
 
+async function triggerReminder(id: string) {
+  const resp = await fetch(`/api/reminders/${id}/fire`, { method: 'POST' });
+  if (!resp.ok) {
+    const text = await resp.text();
+    throw new Error(text || 'Failed to trigger reminder');
+  }
+}
+
 export default function ReminderSettingsPage() {
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [flash, setFlash] = useState<string | null>(null);
   const [form, setForm] = useState<ReminderFormState>({
     type: 'daily_checkin',
     time: '09:00',
@@ -126,9 +135,10 @@ export default function ReminderSettingsPage() {
     });
   };
 
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError(null);
+    setFlash(null);
     const timeParsed = parseTime(form.time);
     if (!timeParsed) {
       setError('Time is required in HH:MM');
@@ -139,6 +149,7 @@ export default function ReminderSettingsPage() {
       await saveReminder(form);
       setForm({ type: 'daily_checkin', time: '09:00', enabled: true, timezone: DEFAULT_TZ });
       await load();
+      setFlash(form.id ? 'Reminder updated' : 'Reminder created');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save');
     } finally {
@@ -149,9 +160,11 @@ export default function ReminderSettingsPage() {
   const handleDelete = async (id: string) => {
     setSavingId(id);
     setError(null);
+    setFlash(null);
     try {
       await deleteReminder(id);
       await load();
+      setFlash('Reminder removed');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete');
     } finally {
@@ -162,6 +175,7 @@ export default function ReminderSettingsPage() {
   const handleToggle = async (reminder: Reminder) => {
     setSavingId(reminder.id);
     setError(null);
+    setFlash(null);
     try {
       await saveReminder({
         id: reminder.id,
@@ -171,8 +185,23 @@ export default function ReminderSettingsPage() {
         timezone: reminder.timezone || DEFAULT_TZ,
       });
       await load();
+      setFlash(!reminder.enabled ? 'Reminder enabled' : 'Reminder disabled');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update');
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const handleTrigger = async (reminder: Reminder) => {
+    setSavingId(reminder.id);
+    setError(null);
+    setFlash(null);
+    try {
+      await triggerReminder(reminder.id);
+      setFlash('Reminder queued to send now');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to trigger reminder');
     } finally {
       setSavingId(null);
     }
@@ -183,6 +212,8 @@ export default function ReminderSettingsPage() {
       <div>
         <h1>Reminders</h1>
         <p>Manage reminder schedules and push delivery.</p>
+        {flash ? <p style={{ color: 'green' }}>{flash}</p> : null}
+        {error ? <p style={{ color: 'red' }}>{error}</p> : null}
       </div>
 
       <section style={{ border: '1px solid #ccc', padding: '1rem', borderRadius: '8px' }}>
@@ -235,7 +266,10 @@ export default function ReminderSettingsPage() {
             </button>
           ) : null}
         </form>
-        {error ? <p style={{ color: 'red' }}>{error}</p> : null}
+        <p style={{ color: '#666', marginTop: '0.5rem' }}>
+          Tip: push tokens come from the Notifications tab—send a test push there first, then schedule daily
+          reminders here.
+        </p>
       </section>
 
       <section style={{ border: '1px solid #ccc', padding: '1rem', borderRadius: '8px' }}>
@@ -264,7 +298,7 @@ export default function ReminderSettingsPage() {
                   </span>
                   <span>Next run: {formatNextRun(reminder.next_run_at, reminder.timezone || DEFAULT_TZ)}</span>
                 </div>
-                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
                     <input
                       type="checkbox"
@@ -274,6 +308,9 @@ export default function ReminderSettingsPage() {
                     />
                     Enabled
                   </label>
+                  <button onClick={() => handleTrigger(reminder)} disabled={savingId === reminder.id}>
+                    Send now
+                  </button>
                   <button onClick={() => handleEdit(reminder)} disabled={savingId === reminder.id}>
                     Edit
                   </button>
